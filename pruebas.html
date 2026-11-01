@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pruebas de logica.js</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 16px; color: #1a1a1a; background: #fff; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  #resumen { font-size: 18px; font-weight: 600; padding: 12px; border-radius: 8px; margin-bottom: 16px; }
+  .todo-ok { background: #e3f6e8; color: #145c2a; }
+  .hay-fallos { background: #fde6e6; color: #8a1c1c; }
+  h2 { font-size: 15px; margin: 20px 0 6px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+  li { list-style: none; padding: 3px 0; font-size: 14px; }
+  .ok::before { content: '✅ '; }
+  .fallo::before { content: '❌ '; }
+  .msg { display: block; margin-left: 24px; color: #8a1c1c; font-family: ui-monospace, monospace; font-size: 12px; }
+  ul { padding: 0; margin: 0; }
+</style>
+<script src="logica.js"></script>
+</head>
+<body>
+<h1>Pruebas de logica.js</h1>
+<div id="resumen">Ejecutando…</div>
+<div id="salida"></div>
+
+<script>
+// ─── Mini marco de pruebas ────────────────────────────────────────────────────
+
+const grupos = [];
+let grupoActual = null;
+
+function grupo(nombre) {
+  grupoActual = { nombre, pruebas: [] };
+  grupos.push(grupoActual);
+}
+
+function prueba(nombre, fn) {
+  try {
+    fn();
+    grupoActual.pruebas.push({ nombre, ok: true });
+  } catch (e) {
+    grupoActual.pruebas.push({ nombre, ok: false, msg: e.message });
+  }
+}
+
+function igual(real, esperado, que) {
+  const iguales = (typeof esperado === 'object' && esperado !== null)
+    ? JSON.stringify(real) === JSON.stringify(esperado)
+    : Object.is(real, esperado);
+  if (!iguales) {
+    throw new Error((que ? que + ': ' : '') + 'esperado ' + mostrar(esperado) + ', recibido ' + mostrar(real));
+  }
+}
+
+function cierto(condicion, que) {
+  if (!condicion) throw new Error(que);
+}
+
+function conErrores(lista, que) {
+  cierto(Array.isArray(lista), (que || '') + ' no devuelve una lista de errores');
+  cierto(lista.length > 0, (que || '') + ' debería tener errores y no tiene');
+}
+
+function sinErrores(lista, que) {
+  cierto(Array.isArray(lista), (que || '') + ' no devuelve una lista de errores');
+  cierto(lista.length === 0, (que || '') + ' no debería tener errores: ' + JSON.stringify(lista));
+}
+
+function mostrar(v) {
+  if (typeof v === 'number' && Number.isNaN(v)) return 'NaN';
+  if (typeof v === 'string') return '"' + v + '"';
+  return JSON.stringify(v);
+}
+
+// ─── Datos de prueba ──────────────────────────────────────────────────────────
+
+// Jugadores ya normalizados. J08 es un segundo invitado, inactivo, solo para pruebas.
+const JUGADORES = [
+  { id_jugador: 'J01', nombre: 'Albert',   tipo: 'fijo',     activo: true,  fecha_alta: '2026-08-31' },
+  { id_jugador: 'J02', nombre: 'Evaristo', tipo: 'fijo',     activo: true,  fecha_alta: '2026-08-31' },
+  { id_jugador: 'J03', nombre: 'Jordi',    tipo: 'fijo',     activo: true,  fecha_alta: '2026-08-31' },
+  { id_jugador: 'J04', nombre: 'Juan',     tipo: 'fijo',     activo: true,  fecha_alta: '2026-08-31' },
+  { id_jugador: 'J05', nombre: 'Rafa',     tipo: 'fijo',     activo: true,  fecha_alta: '2026-09-14' },
+  { id_jugador: 'J06', nombre: 'Santi',    tipo: 'fijo',     activo: true,  fecha_alta: '2026-09-03' },
+  { id_jugador: 'J07', nombre: 'Ricart',   tipo: 'invitado', activo: true,  fecha_alta: '2026-09-17' },
+  { id_jugador: 'J08', nombre: 'Toni',     tipo: 'invitado', activo: false, fecha_alta: '2026-11-01' }
+];
+const POR_ID = {};
+JUGADORES.forEach(j => { POR_ID[j.id_jugador] = j; });
+
+/**
+ * Crea una partida normalizada a partir de un marcador escrito como texto.
+ * P('6-4 6-3 5-3')   → tres sets
+ * P('6-4 _ 6-3')     → el set 2 vacío
+ * P('6-')            → set 1 con solo los juegos de A
+ * extra sobrescribe cualquier campo.
+ */
+function P(marcador, extra) {
+  const p = {
+    id_partida: '20261105-1', fecha: '2026-11-05', estado: 'finalizada',
+    a1: 'J01', a2: 'J02', b1: 'J03', b2: 'J04',
+    s1_a: null, s1_b: null, s2_a: null, s2_b: null, s3_a: null, s3_b: null,
+    incluye_invitado: false, origen: 'app', notas: '', actualizado_en: ''
+  };
+  (marcador ? marcador.trim().split(/\s+/) : []).forEach((s, i) => {
+    if (s === '_') return;
+    const [a, b] = s.split('-');
+    p['s' + (i + 1) + '_a'] = a === '' ? null : Number(a);
+    p['s' + (i + 1) + '_b'] = b === '' ? null : Number(b);
+  });
+  return Object.assign(p, extra || {});
+}
+
+// Las 17 partidas del histórico tal como las devuelve doGet: todo texto salvo los booleanos.
+const HISTORICO_CRUDO = [
+  ['20260831-1', '2026-08-31', 'J02', 'J03', 'J01', 'J04', '7', '6', '6', '2', '5', '3', false, '3er set sin decidir e incompleto'],
+  ['20260903-1', '2026-09-03', 'J03', 'J04', 'J01', 'J06', '6', '4', '6', '3', '6', '7', false, ''],
+  ['20260907-1', '2026-09-07', 'J02', 'J06', 'J01', 'J03', '6', '3', '6', '2', '4', '6', false, ''],
+  ['20260914-1', '2026-09-14', 'J02', 'J05', 'J01', 'J06', '6', '2', '2', '6', '6', '3', false, ''],
+  ['20260917-1', '2026-09-17', 'J01', 'J05', 'J06', 'J07', '6', '2', '7', '5', '6', '1', true, ''],
+  ['20260921-1', '2026-09-21', 'J01', 'J02', 'J05', 'J06', '6', '2', '6', '0', '6', '2', false, ''],
+  ['20260924-1', '2026-09-24', 'J01', 'J05', 'J03', 'J06', '7', '5', '6', '0', '6', '3', false, ''],
+  ['20260928-1', '2026-09-28', 'J02', 'J04', 'J01', 'J03', '6', '3', '1', '6', '7', '5', false, ''],
+  ['20261001-1', '2026-10-01', 'J03', 'J07', 'J01', 'J04', '5', '7', '6', '2', '6', '4', true, ''],
+  ['20261005-1', '2026-10-05', 'J02', 'J03', 'J01', 'J05', '6', '3', '6', '4', '6', '7', false, ''],
+  ['20261008-1', '2026-10-08', 'J01', 'J06', 'J03', 'J05', '7', '6', '6', '2', '6', '4', false, ''],
+  ['20261013-1', '2026-10-13', 'J02', 'J03', 'J04', 'J06', '6', '3', '6', '4', '6', '4', false, ''],
+  ['20261015-1', '2026-10-15', 'J01', 'J07', 'J03', 'J06', '6', '1', '6', '4', '6', '3', true, ''],
+  ['20261019-1', '2026-10-19', 'J01', 'J02', 'J03', 'J04', '6', '3', '6', '1', '4', '6', false, ''],
+  ['20261022-1', '2026-10-22', 'J01', 'J06', 'J04', 'J05', '6', '2', '6', '4', '3', '6', false, ''],
+  ['20261026-1', '2026-10-26', 'J02', 'J04', 'J01', 'J03', '6', '1', '5', '7', '6', '4', false, ''],
+  ['20261029-1', '2026-10-29', 'J01', 'J03', 'J05', 'J06', '6', '0', '7', '5', '6', '1', false, '']
+].map((r, i) => ({
+  _fila: i + 2, id_partida: r[0], fecha: r[1], estado: 'finalizada',
+  a1: r[2], a2: r[3], b1: r[4], b2: r[5],
+  s1_a: r[6], s1_b: r[7], s2_a: r[8], s2_b: r[9], s3_a: r[10], s3_b: r[11],
+  incluye_invitado: r[12], origen: 'historico', notas: r[13], actualizado_en: ''
+}));
+
+const JUGADORES_CRUDO = JUGADORES.slice(0, 7).map((j, i) => Object.assign({ _fila: i + 2 }, j));
+
+function respuesta(partidas, jugadores) {
+  return { ok: true, jugadores: jugadores || JUGADORES_CRUDO, partidas: partidas };
+}
+
+function copia(obj) {
+  return JSON.parse(JSON.stringify(obj));
+}
+
+// ─── Pruebas ──────────────────────────────────────────────────────────────────
+
+grupo('Conversión de tipos');
+
+prueba('aEnteroSet convierte textos y números', () => {
+  igual(aEnteroSet('6'), 6, "'6'");
+  igual(aEnteroSet(' 7 '), 7, "' 7 '");
+  igual(aEnteroSet(6), 6, '6');
+  igual(aEnteroSet('0'), 0, "'0'");
+  igual(aEnteroSet('-1'), -1, "'-1'");
+});
+prueba('aEnteroSet: vacío es null', () => {
+  igual(aEnteroSet(''), null, "''");
+  igual(aEnteroSet(null), null, 'null');
+  igual(aEnteroSet(undefined), null, 'undefined');
+  igual(aEnteroSet('   '), null, "'   '");
+});
+prueba('aEnteroSet: lo que no es entero es NaN', () => {
+  igual(aEnteroSet('6.5'), NaN, "'6.5'");
+  igual(aEnteroSet('a'), NaN, "'a'");
+});
+prueba('aBooleano', () => {
+  igual(aBooleano(true), true, 'true');
+  igual(aBooleano(false), false, 'false');
+  igual(aBooleano('TRUE'), true, "'TRUE'");
+  igual(aBooleano('verdadero'), true, "'verdadero'");
+  igual(aBooleano('FALSO'), false, "'FALSO'");
+  igual(aBooleano(''), false, "''");
+  igual(aBooleano('quizás'), null, "'quizás'");
+});
+prueba('esFechaValida', () => {
+  igual(esFechaValida('2026-08-31'), true, '2026-08-31');
+  igual(esFechaValida('2028-02-29'), true, '2028-02-29 (bisiesto)');
+  igual(esFechaValida('2026-02-30'), false, '2026-02-30');
+  igual(esFechaValida('31/08/2026'), false, '31/08/2026');
+  igual(esFechaValida('2026-8-31'), false, '2026-8-31');
+  igual(esFechaValida(''), false, "''");
+});
+prueba('normalizarPartida convierte tipos y limpia textos', () => {
+  const p = normalizarPartida({
+    id_partida: '20261105-1', fecha: '2026-11-05', estado: ' Finalizada ',
+    a1: ' j01 ', a2: 'J02', b1: 'J03', b2: 'J04',
+    s1_a: '6', s1_b: '4', s2_a: '6', s2_b: '3', s3_a: '', s3_b: '',
+    incluye_invitado: 'FALSO', origen: 'App', notas: ' hola ', actualizado_en: '', _fila: 5
+  });
+  igual(p.estado, 'finalizada', 'estado');
+  igual(p.a1, 'J01', 'a1');
+  igual(p.s1_a, 6, 's1_a');
+  igual(p.s3_a, null, 's3_a');
+  igual(p.incluye_invitado, false, 'incluye_invitado');
+  igual(p.origen, 'app', 'origen');
+  igual(p.notas, 'hola', 'notas');
+  igual(p._fila, 5, '_fila');
+});
+prueba('normalizarPartida no modifica la fila original', () => {
+  const fila = { id_partida: 'x', fecha: '2026-11-05', estado: 'Finalizada', a1: 'j01', s1_a: '6' };
+  const antes = JSON.stringify(fila);
+  normalizarPartida(fila);
+  igual(JSON.stringify(fila), antes, 'fila original');
+});
+prueba('normalizarJugador', () => {
+  const j = normalizarJugador({ id_jugador: ' j09 ', nombre: ' Marc ', tipo: 'Fijo', activo: 'VERDADERO', fecha_alta: '2026-11-01', _fila: 9 });
+  igual(j.id_jugador, 'J09', 'id_jugador');
+  igual(j.nombre, 'Marc', 'nombre');
+  igual(j.tipo, 'fijo', 'tipo');
+  igual(j.activo, true, 'activo');
+  igual(j._fila, 9, '_fila');
+});
+
+grupo('esSetCompleto');
+
+[['6-0', true], ['6-4', true], ['4-6', true], ['7-5', true], ['5-7', true], ['7-6', true], ['6-7', true],
+ ['6-5', false], ['6-6', false], ['5-3', false], ['7-4', false], ['0-0', false]].forEach(([s, esperado]) => {
+  prueba(s + (esperado ? ' es completo' : ' no es completo'), () => {
+    const [a, b] = s.split('-').map(Number);
+    igual(esSetCompleto(a, b), esperado);
+  });
+});
+
+grupo('analizarSets: marcadores válidos');
+
+function comprobarSets(marcador, esperado) {
+  prueba(marcador || '(sin sets)', () => {
+    const r = analizarSets(P(marcador));
+    sinErrores(r.errores, 'errores');
+    igual(r.estado, esperado.estado, 'estado');
+    igual(r.ganador, esperado.ganador, 'ganador');
+    igual(r.setDecisivo, esperado.setDecisivo, 'setDecisivo');
+    if (esperado.completos) igual(r.sets.map(s => s.completo), esperado.completos, 'completo por set');
+    if (esperado.sinDecidir) igual(r.sets.map(s => s.sinDecidir), esperado.sinDecidir, 'sinDecidir por set');
+  });
+}
+
+comprobarSets('6-4 6-3', { estado: 'finalizada', ganador: 'A', setDecisivo: 2, sinDecidir: [false, false] });
+comprobarSets('3-6 1-6', { estado: 'finalizada', ganador: 'B', setDecisivo: 2 });
+comprobarSets('6-4 6-3 5-3', { estado: 'finalizada', ganador: 'A', setDecisivo: 2, completos: [true, true, false], sinDecidir: [false, false, true] });
+comprobarSets('6-4 6-3 6-7', { estado: 'finalizada', ganador: 'A', setDecisivo: 2, completos: [true, true, true], sinDecidir: [false, false, true] });
+comprobarSets('6-4 6-3 6-6', { estado: 'finalizada', ganador: 'A', setDecisivo: 2, completos: [true, true, false], sinDecidir: [false, false, true] });
+comprobarSets('6-2 2-6 6-3', { estado: 'finalizada', ganador: 'A', setDecisivo: 3, sinDecidir: [false, false, false] });
+comprobarSets('5-7 6-2 6-4', { estado: 'finalizada', ganador: 'A', setDecisivo: 3 });
+comprobarSets('6-4 4-6', { estado: 'cortada', ganador: null, setDecisivo: null });
+comprobarSets('6-4 3-2', { estado: 'cortada', ganador: null, setDecisivo: null, completos: [true, false] });
+comprobarSets('6-4 4-6 6-6', { estado: 'cortada', ganador: null, setDecisivo: null });
+comprobarSets('6-4', { estado: 'cortada', ganador: null, setDecisivo: null });
+comprobarSets('3-2', { estado: 'cortada', ganador: null, setDecisivo: null, completos: [false] });
+comprobarSets('', { estado: null, ganador: null, setDecisivo: null });
+
+grupo('analizarSets: marcadores con errores');
+
+[
+  ['7-3', 'set imposible con 7 juegos'],
+  ['8-6', 'más de 7 juegos'],
+  ['6-4 _ 6-3', 'set jugado detrás de un set vacío'],
+  ['_ 6-4', 'set 1 vacío y set 2 jugado'],
+  ['6-4 3-2 6-1', 'set incompleto que no es el último'],
+  ['0-0', 'set 0-0'],
+  ['6-', 'falta un lado del set'],
+  ['x-6', 'juegos que no son un número']
+].forEach(([marcador, que]) => {
+  prueba(marcador + ': ' + que, () => conErrores(analizarSets(P(marcador)).errores));
+});
+prueba('juegos negativos', () => conErrores(analizarSets(P('', { s1_a: -1, s1_b: 6 })).errores));
+prueba('juegos decimales (NaN)', () => conErrores(analizarSets(P('', { s1_a: NaN, s1_b: 6 })).errores));
+
+grupo('calcularEstado');
+
+prueba('6-4 6-3 → finalizada', () => igual(calcularEstado(P('6-4 6-3')), 'finalizada'));
+prueba('6-4 6-3 5-3 → finalizada', () => igual(calcularEstado(P('6-4 6-3 5-3')), 'finalizada'));
+prueba('6-4 4-6 → cortada', () => igual(calcularEstado(P('6-4 4-6')), 'cortada'));
+prueba('sin sets → null', () => igual(calcularEstado(P('')), null));
+prueba('marcador con errores → null', () => igual(calcularEstado(P('7-3')), null));
+
+grupo('validarPartida');
+
+const casosValidos = [
+  ['finalizada 6-4 6-3', P('6-4 6-3')],
+  ['finalizada con set sin decidir incompleto', P('6-4 6-3 5-3')],
+  ['cortada 6-4 4-6', P('6-4 4-6', { estado: 'cortada' })],
+  ['programada sin sets', P('', { estado: 'programada' })],
+  ['cancelada sin sets', P('', { estado: 'cancelada' })],
+  ['con 1 invitado', P('6-4 6-3', { a2: 'J07' })],
+  ['con un jugador inactivo', P('6-4 6-3', { b2: 'J08' })]
+];
+casosValidos.forEach(([nombre, p]) => {
+  prueba('válida: ' + nombre, () => sinErrores(validarPartida(p, POR_ID)));
+});
+
+const casosInvalidos = [
+  ['programada con juegos', P('6-4', { estado: 'programada' })],
+  ['cancelada con juegos', P('6-4 6-3', { estado: 'cancelada' })],
+  ['2-0 marcada como cortada', P('6-4 6-3', { estado: 'cortada' })],
+  ['1-1 marcada como finalizada', P('6-4 4-6', { estado: 'finalizada' })],
+  ['finalizada sin sets', P('', { estado: 'finalizada' })],
+  ['cortada sin sets', P('', { estado: 'cortada' })],
+  ['marcador con errores', P('7-3', { estado: 'cortada' })],
+  ['jugador repetido', P('6-4 6-3', { a2: 'J01' })],
+  ['jugador desconocido', P('6-4 6-3', { b2: 'J99' })],
+  ['falta un jugador', P('6-4 6-3', { b2: '' })],
+  ['2 invitados', P('6-4 6-3', { a2: 'J07', b2: 'J08' })],
+  ['fecha imposible', P('6-4 6-3', { fecha: '2026-02-30' })],
+  ['fecha con otro formato', P('6-4 6-3', { fecha: '05/11/2026' })],
+  ['estado desconocido', P('6-4 6-3', { estado: 'jugada' })]
+];
+casosInvalidos.forEach(([nombre, p]) => {
+  prueba('inválida: ' + nombre, () => conErrores(validarPartida(p, POR_ID)));
+});
+
+prueba('contarInvitados', () => {
+  igual(contarInvitados(P(''), POR_ID), 0, 'sin invitados');
+  igual(contarInvitados(P('', { a2: 'J07' }), POR_ID), 1, 'con Ricart');
+  igual(contarInvitados(P('', { a2: 'J07', b2: 'J08' }), POR_ID), 2, 'con dos invitados');
+  igual(contarInvitados(P('', { b2: 'J99' }), POR_ID), 0, 'id desconocido');
+});
+
+grupo('validarJugador');
+
+const nuevo = { id_jugador: 'J09', nombre: 'Marc', tipo: 'fijo', activo: true, fecha_alta: '2026-11-01' };
+prueba('jugador nuevo válido', () => sinErrores(validarJugador(nuevo, JUGADORES, null)));
+prueba('nombre repetido sin distinguir mayúsculas', () =>
+  conErrores(validarJugador(Object.assign({}, nuevo, { nombre: 'albert' }), JUGADORES, null)));
+prueba('editar a un jugador sin cambiarle el nombre', () =>
+  sinErrores(validarJugador(Object.assign({}, JUGADORES[0]), JUGADORES, 'J01')));
+prueba('sin nombre', () => conErrores(validarJugador(Object.assign({}, nuevo, { nombre: '' }), JUGADORES, null)));
+prueba('tipo desconocido', () => conErrores(validarJugador(Object.assign({}, nuevo, { tipo: 'socio' }), JUGADORES, null)));
+prueba('activo no interpretable', () => conErrores(validarJugador(Object.assign({}, nuevo, { activo: null }), JUGADORES, null)));
+prueba('fecha_alta no válida', () => conErrores(validarJugador(Object.assign({}, nuevo, { fecha_alta: '' }), JUGADORES, null)));
+
+grupo('compararPartidas');
+
+prueba('ordena por fecha y por secuencia numérica', () => {
+  const lista = ['20261105-10', '20261105-2', '20261104-1', '20261105-1'].map(id => ({
+    id_partida: id, fecha: id.slice(0, 4) + '-' + id.slice(4, 6) + '-' + id.slice(6, 8)
+  }));
+  igual(lista.slice().sort(compararPartidas).map(p => p.id_partida),
+    ['20261104-1', '20261105-1', '20261105-2', '20261105-10']);
+});
+prueba('la fecha manda sobre el id (partida con la fecha corregida)', () => {
+  const lista = [
+    { id_partida: '20261105-1', fecha: '2026-11-03' },
+    { id_partida: '20261104-1', fecha: '2026-11-04' }
+  ];
+  igual(lista.slice().sort(compararPartidas).map(p => p.id_partida), ['20261105-1', '20261104-1']);
+});
+
+grupo('temporadaDe');
+
+[['2026-08-31', '2026-27'], ['2026-08-01', '2026-27'], ['2026-07-31', '2025-26'],
+ ['2027-01-15', '2026-27'], ['2027-08-01', '2027-28'], ['2099-09-01', '2099-00']].forEach(([f, t]) => {
+  prueba(f + ' → ' + t, () => igual(temporadaDe(f), t));
+});
+
+grupo('generarRepartos');
+
+prueba('devuelve los 3 repartos en orden', () => {
+  igual(generarRepartos(['J01', 'J02', 'J03', 'J04']), [
+    { a: ['J01', 'J02'], b: ['J03', 'J04'] },
+    { a: ['J01', 'J03'], b: ['J02', 'J04'] },
+    { a: ['J01', 'J04'], b: ['J02', 'J03'] }
+  ]);
+});
+prueba('cada reparto usa los 4 jugadores y las 6 parejas posibles salen una vez', () => {
+  const parejas = [];
+  generarRepartos(['J05', 'J02', 'J07', 'J01']).forEach(r => {
+    igual(r.a.concat(r.b).slice().sort(), ['J01', 'J02', 'J05', 'J07'], 'jugadores');
+    parejas.push(r.a.slice().sort().join('-'), r.b.slice().sort().join('-'));
+  });
+  igual(new Set(parejas).size, 6, 'parejas distintas');
+});
+prueba('rechaza menos de 4 jugadores o repetidos', () => {
+  [['J01', 'J02', 'J03'], ['J01', 'J01', 'J02', 'J03']].forEach(ids => {
+    let lanzado = false;
+    try { generarRepartos(ids); } catch (e) { lanzado = true; }
+    cierto(lanzado, JSON.stringify(ids) + ' debería lanzar un error');
+  });
+});
+
+grupo('parsearDatos');
+
+prueba('rechaza una respuesta con ok = false', () => {
+  let lanzado = false;
+  try { parsearDatos({ ok: false, error: 'algo' }); } catch (e) { lanzado = true; }
+  cierto(lanzado, 'debería lanzar un error');
+});
+prueba('rechaza una respuesta sin partidas', () => {
+  let lanzado = false;
+  try { parsearDatos({ ok: true, jugadores: [] }); } catch (e) { lanzado = true; }
+  cierto(lanzado, 'debería lanzar un error');
+});
+prueba('carga el histórico sin errores', () => {
+  const d = parsearDatos(respuesta(copia(HISTORICO_CRUDO)));
+  igual(d.jugadores.length, 7, 'jugadores');
+  igual(d.partidas.length, 17, 'partidas');
+  igual(d.filasConError, [], 'filasConError');
+  cierto(d.jugadoresPorId.J07 && d.jugadoresPorId.J07.nombre === 'Ricart', 'jugadoresPorId.J07');
+  d.partidas.forEach(p => sinErrores(p.errores, p.id_partida));
+});
+prueba('convierte los juegos a números', () => {
+  const d = parsearDatos(respuesta(copia(HISTORICO_CRUDO)));
+  igual(d.partidas[0].s1_a, 7, 's1_a de la primera partida');
+});
+prueba('ordena las partidas aunque lleguen desordenadas', () => {
+  const desordenadas = copia(HISTORICO_CRUDO).reverse();
+  const d = parsearDatos(respuesta(desordenadas));
+  igual(d.partidas[0].id_partida, '20260831-1', 'primera');
+  igual(d.partidas[16].id_partida, '20261029-1', 'última');
+});
+prueba('una fila mala no rompe la carga y queda marcada', () => {
+  const filas = copia(HISTORICO_CRUDO);
+  filas[3].s1_a = '7'; filas[3].s1_b = '3'; // 7-3
+  const d = parsearDatos(respuesta(filas));
+  igual(d.partidas.length, 17, 'partidas');
+  conErrores(d.partidas.find(p => p.id_partida === '20260914-1').errores, '20260914-1');
+  igual(d.filasConError.length, 1, 'filasConError');
+  igual(d.filasConError[0].fila, 5, 'fila en la hoja');
+});
+prueba('detecta ids de partida repetidos', () => {
+  const filas = copia(HISTORICO_CRUDO);
+  filas[1].id_partida = '20260831-1';
+  const d = parsearDatos(respuesta(filas));
+  igual(d.partidas.filter(p => p.errores.length > 0).length, 2, 'partidas con error');
+});
+prueba('marca un jugador con activo no interpretable', () => {
+  const jugadores = copia(JUGADORES_CRUDO);
+  jugadores[2].activo = 'quizás';
+  const d = parsearDatos(respuesta(copia(HISTORICO_CRUDO), jugadores));
+  conErrores(d.jugadoresPorId.J03.errores, 'J03');
+  igual(d.filasConError.length, 1, 'filasConError');
+});
+prueba('recalcula incluye_invitado sin fiarse de la hoja', () => {
+  const filas = copia(HISTORICO_CRUDO);
+  filas[4].incluye_invitado = false; // 20260917-1, con Ricart
+  filas[0].incluye_invitado = true;  // 20260831-1, sin invitado
+  const d = parsearDatos(respuesta(filas));
+  igual(d.partidas.find(p => p.id_partida === '20260917-1').incluye_invitado, true, '20260917-1');
+  igual(d.partidas.find(p => p.id_partida === '20260831-1').incluye_invitado, false, '20260831-1');
+});
+prueba('una partida programada tiene los sets a null', () => {
+  const filas = copia(HISTORICO_CRUDO);
+  filas.push({ _fila: 19, id_partida: '20261102-1', fecha: '2026-11-02', estado: 'programada',
+    a1: 'J01', a2: 'J02', b1: 'J03', b2: 'J04', s1_a: '', s1_b: '', s2_a: '', s2_b: '', s3_a: '', s3_b: '',
+    incluye_invitado: false, origen: 'app', notas: '', actualizado_en: '' });
+  const d = parsearDatos(respuesta(filas));
+  const p = d.partidas.find(x => x.id_partida === '20261102-1');
+  sinErrores(p.errores, '20261102-1');
+  igual(p.s1_a, null, 's1_a');
+});
+
+grupo('Histórico: comprobaciones de conjunto');
+
+function analisisHistorico() {
+  return HISTORICO_CRUDO.map(f => ({ id: f.id_partida, r: analizarSets(normalizarPartida(f)) }));
+}
+prueba('las 17 partidas son válidas', () => {
+  HISTORICO_CRUDO.forEach(f => sinErrores(validarPartida(normalizarPartida(f), POR_ID), f.id_partida));
+});
+prueba('en todas gana la pareja A', () => {
+  analisisHistorico().forEach(x => igual(x.r.ganador, 'A', x.id));
+});
+prueba('13 partidas tienen un set sin decidir', () => {
+  igual(analisisHistorico().filter(x => x.r.sets.some(s => s.sinDecidir)).length, 13);
+});
+prueba('solo 4 se decidieron en el tercer set', () => {
+  igual(analisisHistorico().filter(x => x.r.setDecisivo === 3).map(x => x.id),
+    ['20260914-1', '20260928-1', '20261001-1', '20261026-1']);
+});
+prueba('el único set incompleto es el tercero del 31 de agosto', () => {
+  const incompletos = [];
+  analisisHistorico().forEach(x => x.r.sets.forEach(s => { if (!s.completo) incompletos.push(x.id + ' set ' + s.num); }));
+  igual(incompletos, ['20260831-1 set 3']);
+});
+prueba('3 partidas con invitado', () => {
+  igual(HISTORICO_CRUDO.filter(f => contarInvitados(normalizarPartida(f), POR_ID) === 1).map(f => f.id_partida),
+    ['20260917-1', '20261001-1', '20261015-1']);
+});
+
+// ─── Resultado ────────────────────────────────────────────────────────────────
+
+(function pintar() {
+  const salida = document.getElementById('salida');
+  let total = 0;
+  let fallos = 0;
+  grupos.forEach(g => {
+    const h = document.createElement('h2');
+    const ul = document.createElement('ul');
+    let fallosGrupo = 0;
+    g.pruebas.forEach(p => {
+      total++;
+      if (!p.ok) { fallos++; fallosGrupo++; }
+      const li = document.createElement('li');
+      li.className = p.ok ? 'ok' : 'fallo';
+      li.textContent = p.nombre;
+      if (!p.ok) {
+        const m = document.createElement('span');
+        m.className = 'msg';
+        m.textContent = p.msg;
+        li.appendChild(m);
+      }
+      ul.appendChild(li);
+    });
+    h.textContent = g.nombre + ' (' + (g.pruebas.length - fallosGrupo) + '/' + g.pruebas.length + ')';
+    salida.appendChild(h);
+    salida.appendChild(ul);
+  });
+  const resumen = document.getElementById('resumen');
+  resumen.textContent = (total - fallos) + ' de ' + total + ' pruebas correctas';
+  resumen.className = fallos ? 'hay-fallos' : 'todo-ok';
+})();
+</script>
+</body>
+</html>

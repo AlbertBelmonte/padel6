@@ -1,0 +1,988 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f4f5f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#151816" media="(prefers-color-scheme: dark)">
+<title>Pádel</title>
+<style>
+  :root {
+    --fondo: #f4f5f2;
+    --superficie: #ffffff;
+    --superficie-2: #eceee9;
+    --texto: #1b1f1c;
+    --suave: #5f6862;
+    --borde: #d9ddd6;
+    --acento: #1f7a4a;
+    --acento-texto: #ffffff;
+    --acento-suave: #dcefe3;
+    --peligro: #b3261e;
+    --peligro-suave: #fbe3e1;
+    --aviso: #8a5a00;
+    --aviso-suave: #fdf0d5;
+    --radio: 12px;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fondo: #151816;
+      --superficie: #1f2420;
+      --superficie-2: #2a302b;
+      --texto: #e9ece8;
+      --suave: #a1aba4;
+      --borde: #343b35;
+      --acento: #4cbf7f;
+      --acento-texto: #0d1f14;
+      --acento-suave: #1d3a28;
+      --peligro: #f2b8b5;
+      --peligro-suave: #3d1f1d;
+      --aviso: #f4c766;
+      --aviso-suave: #3a2f14;
+      color-scheme: dark;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--fondo);
+    color: var(--texto);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  button:disabled { cursor: default; opacity: .4; }
+
+  /* Cabecera */
+  .barra {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+    background: var(--fondo);
+    border-bottom: 1px solid var(--borde);
+  }
+  .barra h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -.01em; }
+  .barra h1 span { color: var(--acento); }
+  .btn-editor {
+    min-height: 40px; padding: 0 14px; border-radius: 999px;
+    border: 1px solid var(--borde); background: var(--superficie);
+    font-size: 14px; font-weight: 600;
+  }
+  body.editor .btn-editor { background: var(--acento-suave); border-color: transparent; color: var(--acento); }
+
+  main { max-width: 560px; margin: 0 auto; padding: 8px 16px 24px; }
+  h2 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--suave); margin: 22px 0 8px; }
+  h2:first-child { margin-top: 12px; }
+
+  /* Estado de carga */
+  #estado { max-width: 560px; margin: 0 auto; padding: 0 16px; font-size: 13px; color: var(--suave); }
+  #estado:not(:empty) { padding-top: 8px; }
+  #estado.alerta { color: var(--aviso); }
+
+  /* Tarjetas de partida */
+  .tarjeta {
+    background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio);
+    padding: 12px 14px; margin-bottom: 8px;
+  }
+  .partida[role="button"] { cursor: pointer; }
+  .partida[role="button"]:active { background: var(--superficie-2); }
+  .partida.apagada { opacity: .55; }
+  .cab { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 13px; color: var(--suave); }
+  .cab .fecha { margin-right: auto; text-transform: capitalize; }
+  .lado { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+  .lado .nombres { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lado.ganador .nombres { font-weight: 700; }
+  .lado.ganador .nombres::after { content: " ✓"; color: var(--acento); }
+  .juegos { display: flex; gap: 4px; }
+  .juego {
+    width: 24px; text-align: center; font-variant-numeric: tabular-nums;
+    border-radius: 6px; padding: 1px 0; color: var(--suave);
+  }
+  .juego.gano { color: var(--texto); font-weight: 700; }
+  .juego.sd { opacity: .5; }
+  .juego.inc { font-style: italic; }
+  .pie-tarjeta { margin-top: 6px; font-size: 13px; color: var(--suave); }
+  .pie-tarjeta.error { color: var(--peligro); }
+
+  .chip {
+    display: inline-block; font-size: 12px; font-weight: 600; line-height: 1;
+    padding: 4px 8px; border-radius: 999px; background: var(--superficie-2); color: var(--suave);
+  }
+  .chip-programada { background: var(--acento-suave); color: var(--acento); }
+  .chip-cortada { background: var(--aviso-suave); color: var(--aviso); }
+  .chip-error { background: var(--peligro-suave); color: var(--peligro); }
+
+  .vacio { color: var(--suave); padding: 14px 0; margin: 0; }
+  .alerta-caja {
+    background: var(--peligro-suave); color: var(--peligro); border-radius: var(--radio);
+    padding: 10px 14px; margin-top: 12px; font-size: 14px;
+  }
+  .alerta-caja summary { font-weight: 600; cursor: pointer; }
+  .alerta-caja ul { margin: 8px 0 0; padding-left: 18px; }
+
+  /* Formularios */
+  label.campo { display: block; font-size: 13px; color: var(--suave); margin-bottom: 4px; }
+  input[type="date"], input[type="text"], input[type="password"], select {
+    width: 100%; min-height: 48px; padding: 10px 12px;
+    background: var(--superficie); border: 1px solid var(--borde); border-radius: 10px;
+  }
+  .filtros { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+  .contador { font-size: 13px; color: var(--suave); margin: 10px 0 8px; }
+
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    width: 100%; min-height: 52px; border-radius: 12px; border: 0;
+    font-size: 17px; font-weight: 700; margin-top: 12px;
+  }
+  .btn.pri { background: var(--acento); color: var(--acento-texto); }
+  .btn.sec { background: var(--superficie-2); color: var(--texto); font-weight: 600; font-size: 15px; min-height: 46px; }
+  .btn.peligro { background: transparent; color: var(--peligro); font-weight: 600; font-size: 15px; min-height: 46px; }
+  .fila-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .fila-btns .btn { margin-top: 8px; }
+
+  /* Selección de jugadores */
+  .rejilla { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .jug {
+    min-height: 60px; border-radius: 12px; border: 2px solid var(--borde); background: var(--superficie);
+    font-weight: 600; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px;
+  }
+  .jug small { font-weight: 500; font-size: 11px; color: var(--suave); }
+  .jug.sel { border-color: var(--acento); background: var(--acento-suave); color: var(--acento); }
+  .reparto {
+    width: 100%; text-align: left; border-radius: 12px; border: 2px solid var(--borde); background: var(--superficie);
+    padding: 12px 14px; margin-bottom: 8px; min-height: 60px;
+  }
+  .reparto.sel { border-color: var(--acento); background: var(--acento-suave); }
+  .reparto .vs { display: block; font-size: 12px; color: var(--suave); margin: 2px 0; }
+  .reparto strong { display: block; }
+
+  /* Resultado */
+  .parejas-res { display: grid; gap: 4px; margin-top: 12px; }
+  .parejas-res div { display: flex; gap: 8px; align-items: baseline; }
+  .etq { font-size: 12px; font-weight: 700; color: var(--acento); width: 16px; }
+  .set { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: 10px 12px; margin-top: 10px; }
+  .set-cab { display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+  .set-cab span { font-weight: 500; color: var(--suave); }
+  .set-fila { display: grid; grid-template-columns: 18px repeat(8, 1fr); gap: 4px; align-items: center; margin-top: 4px; }
+  .num {
+    min-height: 44px; border-radius: 8px; border: 1px solid var(--borde); background: var(--fondo);
+    font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; padding: 0;
+  }
+  .num.sel { background: var(--acento); border-color: var(--acento); color: var(--acento-texto); }
+  .resumen-res { margin-top: 14px; padding: 12px 14px; border-radius: var(--radio); background: var(--superficie-2); font-weight: 600; }
+  .resumen-res.ok { background: var(--acento-suave); color: var(--acento); }
+  .resumen-res.error { background: var(--peligro-suave); color: var(--peligro); font-weight: 500; }
+  .resumen-res ul { margin: 0; padding-left: 18px; }
+  .nota-cambio { font-size: 13px; color: var(--suave); margin-top: 8px; }
+
+  /* Jugadores */
+  .jugador-fila { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .jugador-fila .nombre { font-weight: 700; margin-right: auto; }
+  .acciones-jug { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .mini {
+    min-height: 36px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--borde);
+    background: var(--fondo); font-size: 13px; font-weight: 600;
+  }
+  .nuevo-jug { display: grid; grid-template-columns: 1fr 120px; gap: 8px; }
+
+  /* Navegación inferior */
+  nav.nav {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    display: flex; justify-content: center;
+    background: var(--superficie); border-top: 1px solid var(--borde);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  nav.nav button {
+    flex: 1; max-width: 140px; min-height: 60px; border: 0; background: none;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    font-size: 12px; font-weight: 600; color: var(--suave);
+  }
+  nav.nav button svg { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  nav.nav button.activa { color: var(--acento); }
+  .solo-editor { display: none !important; }
+  body.editor .solo-editor { display: flex !important; }
+
+  /* Diálogo y avisos */
+  dialog {
+    border: 0; border-radius: 16px; padding: 20px; width: min(92vw, 360px);
+    background: var(--superficie); color: var(--texto);
+  }
+  dialog::backdrop { background: rgba(0, 0, 0, .45); }
+  dialog h3 { margin: 0 0 4px; font-size: 18px; }
+  dialog p { margin: 0 0 12px; color: var(--suave); font-size: 14px; }
+  .error-texto { color: var(--peligro) !important; min-height: 1em; margin: 6px 0 0 !important; }
+  #toast {
+    position: fixed; left: 50%; bottom: calc(76px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    max-width: min(92vw, 520px); padding: 12px 16px; border-radius: 12px;
+    background: var(--texto); color: var(--fondo); font-size: 14px; font-weight: 600;
+    opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 20;
+  }
+  #toast.visible { opacity: 1; }
+  #toast.error { background: var(--peligro); color: #fff; }
+</style>
+<script src="logica.js"></script>
+</head>
+<body>
+
+<header class="barra">
+  <h1>Pádel <span>6</span></h1>
+  <button id="btnEditor" class="btn-editor" type="button">Editor</button>
+</header>
+
+<div id="estado" role="status"></div>
+<main id="vista"><p class="vacio">Cargando…</p></main>
+
+<nav class="nav" aria-label="Secciones">
+  <button type="button" data-ir="inicio">
+    <svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>Inicio
+  </button>
+  <button type="button" data-ir="historial">
+    <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>Historial
+  </button>
+  <button type="button" data-ir="nueva" class="solo-editor">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>Nueva
+  </button>
+  <button type="button" data-ir="jugadores" class="solo-editor">
+    <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.4 3.3-5.5 6.5-5.5s5.9 2.1 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18.5 14.8c1.6.9 2.7 2.6 3 5.2"/></svg>Jugadores
+  </button>
+</nav>
+
+<dialog id="dlgPin">
+  <form id="formPin">
+    <h3>Modo editor</h3>
+    <p>Introduce el PIN. Este navegador lo recordará hasta que pulses «Salir».</p>
+    <input id="inpPin" type="password" inputmode="numeric" autocomplete="off" aria-label="PIN">
+    <p id="errPin" class="error-texto"></p>
+    <div class="fila-btns">
+      <button type="button" id="pinCancelar" class="btn sec">Cancelar</button>
+      <button type="submit" id="pinEntrar" class="btn pri">Entrar</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" role="alert"></div>
+
+<script>
+// ─── Configuración ────────────────────────────────────────────────────────────
+
+const API_URL = 'https://script.google.com/macros/s/AKfycbwRtCixP2FUUnqqk7diRqpuL8gOVpttruZmStHmS-oj8a7PfZXXaVLIhrgj5GNyTsks/exec';
+const CLAVE_DATOS = 'padel6.datos';
+const CLAVE_PIN = 'padel6.pin';
+const REFRESCO_MIN_MS = 60 * 1000; // al volver a la app, refresca si han pasado más de 60 s
+
+// ─── Estado de la app ─────────────────────────────────────────────────────────
+
+const app = {
+  crudo: null,          // última respuesta de doGet (lo que se guarda en caché)
+  datos: null,          // resultado de parsearDatos(crudo)
+  errorCarga: null,
+  actualizando: false,
+  sinConexion: false,
+  ultimoRefresco: 0,
+  pin: leer(CLAVE_PIN),
+  vista: 'inicio',
+  volver: 'inicio',     // vista a la que se vuelve al salir de Resultado
+  ocupado: false,       // hay una escritura en curso
+  filtro: { temporada: null, jugador: '' },
+  nueva: null,          // { fecha, seleccion: [ids], reparto: índice o null }
+  edicion: null         // partida que se está editando en Resultado
+};
+
+// ─── Almacenamiento local (siempre con try/catch) ─────────────────────────────
+
+function leer(clave) {
+  try {
+    const v = localStorage.getItem(clave);
+    return v === null ? null : JSON.parse(v);
+  } catch (e) {
+    return null;
+  }
+}
+function guardar(clave, valor) {
+  try { localStorage.setItem(clave, JSON.stringify(valor)); } catch (e) { /* sin almacenamiento */ }
+}
+function borrar(clave) {
+  try { localStorage.removeItem(clave); } catch (e) { /* sin almacenamiento */ }
+}
+
+// ─── Utilidades ───────────────────────────────────────────────────────────────
+
+function esEditor() { return !!app.pin; }
+
+function esc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function dos(n) { return String(n).padStart(2, '0'); }
+
+function hoy() {
+  const d = new Date();
+  return d.getFullYear() + '-' + dos(d.getMonth() + 1) + '-' + dos(d.getDate());
+}
+
+function fechaLarga(f) {
+  if (!esFechaValida(f)) return esc(f || 'sin fecha');
+  const d = new Date(f + 'T12:00:00');
+  const opciones = { weekday: 'short', day: 'numeric', month: 'short' };
+  if (d.getFullYear() !== new Date().getFullYear()) opciones.year = 'numeric';
+  return esc(d.toLocaleDateString('es-ES', opciones));
+}
+
+function nombre(id) {
+  const j = app.datos && app.datos.jugadoresPorId[id];
+  return j ? j.nombre : id;
+}
+
+function pareja(p, lado) {
+  return nombre(p[lado + '1']) + ' y ' + nombre(p[lado + '2']);
+}
+
+let temporizadorToast = null;
+function toast(mensaje, esError) {
+  const t = document.getElementById('toast');
+  t.textContent = mensaje;
+  t.className = 'visible' + (esError ? ' error' : '');
+  clearTimeout(temporizadorToast);
+  temporizadorToast = setTimeout(function () { t.className = ''; }, esError ? 5000 : 2500);
+}
+
+// ─── Datos: caché, lectura y escritura ────────────────────────────────────────
+
+function aplicarCrudo(crudo) {
+  try {
+    app.datos = parsearDatos(crudo);
+    app.crudo = crudo;
+    app.errorCarga = null;
+  } catch (e) {
+    app.errorCarga = e.message;
+  }
+}
+
+async function refrescar() {
+  app.actualizando = true;
+  pintarEstado();
+  try {
+    const r = await fetch(API_URL, { cache: 'no-store' });
+    const j = await r.json();
+    parsearDatos(j); // lanza un error si la respuesta no sirve
+    guardar(CLAVE_DATOS, j);
+    aplicarCrudo(j);
+    app.sinConexion = false;
+    app.ultimoRefresco = Date.now();
+  } catch (e) {
+    app.sinConexion = true;
+    if (!app.datos) app.errorCarga = 'No se han podido cargar los datos (' + e.message + ').';
+  } finally {
+    app.actualizando = false;
+    pintar();
+  }
+}
+
+/** Envía una escritura. Sin cabecera Content-Type, para evitar el preflight de CORS. */
+async function enviar(accion, datos, pin) {
+  const r = await fetch(API_URL, {
+    method: 'POST',
+    body: JSON.stringify({ pin: pin || app.pin, accion: accion, datos: datos || {} })
+  });
+  const j = await r.json();
+  if (!j.ok) {
+    if (j.error === 'PIN incorrecto' && !pin) {
+      app.pin = null;
+      borrar(CLAVE_PIN);
+      pintar();
+      throw new Error('El PIN guardado ya no es válido. Vuelve a entrar como editor.');
+    }
+    throw new Error(j.error || 'Error desconocido del servidor');
+  }
+  return j;
+}
+
+/** Ejecuta una escritura bloqueando los botones y mostrando el error si falla. */
+async function conOcupado(fn) {
+  if (app.ocupado) return;
+  app.ocupado = true;
+  pintar();
+  try {
+    await fn();
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    app.ocupado = false;
+    pintar();
+  }
+}
+
+/** Mete en los datos locales la fila que devuelve el servidor, sin esperar a recargar todo. */
+function fusionar(lista, clave, fila) {
+  const c = app.crudo;
+  const i = c[lista].findIndex(function (x) { return x[clave] === fila[clave]; });
+  if (i >= 0) c[lista][i] = Object.assign({}, c[lista][i], fila);
+  else c[lista].push(Object.assign({}, fila));
+  guardar(CLAVE_DATOS, c);
+  aplicarCrudo(c);
+}
+
+// ─── Navegación y pintado ─────────────────────────────────────────────────────
+
+const VISTAS_EDITOR = ['nueva', 'resultado', 'jugadores'];
+
+function ir(vista) {
+  app.vista = vista;
+  window.scrollTo(0, 0);
+  pintar();
+}
+
+function pintar() {
+  document.body.classList.toggle('editor', esEditor());
+  document.getElementById('btnEditor').textContent = esEditor() ? 'Salir' : 'Editor';
+
+  if (VISTAS_EDITOR.indexOf(app.vista) !== -1 && !esEditor()) app.vista = 'inicio';
+  document.querySelectorAll('nav.nav button').forEach(function (b) {
+    const activa = b.dataset.ir === app.vista || (app.vista === 'resultado' && b.dataset.ir === app.volver);
+    b.classList.toggle('activa', activa);
+  });
+
+  pintarEstado();
+
+  const v = document.getElementById('vista');
+  if (!app.datos) {
+    v.innerHTML = app.errorCarga
+      ? '<div class="alerta-caja">' + esc(app.errorCarga) + '</div>' +
+        '<button class="btn sec" data-accion="reintentar">Reintentar</button>'
+      : '<p class="vacio">Cargando…</p>';
+    return;
+  }
+  const vistas = { inicio: vistaInicio, historial: vistaHistorial, nueva: vistaNueva, resultado: vistaResultado, jugadores: vistaJugadores };
+  v.innerHTML = vistas[app.vista]();
+}
+
+function pintarEstado() {
+  const e = document.getElementById('estado');
+  let texto = '';
+  let alerta = false;
+  if (app.actualizando && app.datos) texto = 'Actualizando…';
+  else if (app.sinConexion && app.datos) { texto = 'Sin conexión: se muestran los últimos datos guardados.'; alerta = true; }
+  if (app.ocupado) texto = 'Guardando…';
+  e.textContent = texto;
+  e.className = alerta ? 'alerta' : '';
+}
+
+// ─── Piezas comunes ───────────────────────────────────────────────────────────
+
+function vacio(texto) { return '<p class="vacio">' + esc(texto) + '</p>'; }
+
+function tarjetaPartida(p) {
+  const r = analizarSets(p);
+  const editable = esEditor();
+
+  function fila(lado) {
+    const gana = p.estado === 'finalizada' && !p.errores.length && r.ganador === lado.toUpperCase();
+    const juegos = r.sets.map(function (s) {
+      const propios = lado === 'a' ? s.a : s.b;
+      const ajenos = lado === 'a' ? s.b : s.a;
+      let clase = 'juego';
+      if (s.completo && propios > ajenos) clase += ' gano';
+      if (s.sinDecidir) clase += ' sd';
+      if (!s.completo) clase += ' inc';
+      return '<span class="' + clase + '">' + propios + '</span>';
+    }).join('');
+    return '<div class="lado' + (gana ? ' ganador' : '') + '">' +
+      '<span class="nombres">' + esc(nombre(p[lado + '1'])) + ' · ' + esc(nombre(p[lado + '2'])) + '</span>' +
+      '<span class="juegos">' + juegos + '</span></div>';
+  }
+
+  let chips = '';
+  if (p.errores.length) chips += '<span class="chip chip-error">error</span>';
+  if (p.estado !== 'finalizada') chips += '<span class="chip chip-' + esc(p.estado) + '">' + esc(p.estado || 'sin estado') + '</span>';
+
+  let pie = '';
+  if (p.errores.length && editable) pie = '<div class="pie-tarjeta error">' + esc(p.errores.join(' · ')) + '</div>';
+  else if (p.estado === 'programada' && editable) pie = '<div class="pie-tarjeta">Toca para introducir el resultado</div>';
+  else if (p.notas) pie = '<div class="pie-tarjeta">' + esc(p.notas) + '</div>';
+
+  const atributos = editable
+    ? ' role="button" tabindex="0" data-accion="editar" data-id="' + esc(p.id_partida) + '"'
+    : '';
+  return '<article class="tarjeta partida' + (p.estado === 'cancelada' ? ' apagada' : '') + '"' + atributos + '>' +
+    '<div class="cab"><span class="fecha">' + fechaLarga(p.fecha) + '</span>' + chips + '</div>' +
+    fila('a') + fila('b') + pie + '</article>';
+}
+
+function avisoErrores() {
+  const filas = app.datos.filasConError;
+  if (!esEditor() || !filas.length) return '';
+  const items = filas.map(function (f) {
+    return '<li>' + esc(f.pestana) + ', fila ' + esc(f.fila) + ' (' + esc(f.id || 'sin id') + '): ' + esc(f.errores.join('; ')) + '</li>';
+  }).join('');
+  return '<details class="alerta-caja"><summary>' + filas.length + (filas.length === 1 ? ' fila' : ' filas') +
+    ' de la hoja con errores</summary><ul>' + items + '</ul></details>';
+}
+
+// ─── Vista: Inicio ────────────────────────────────────────────────────────────
+
+function vistaInicio() {
+  const partidas = app.datos.partidas.filter(function (p) { return !p.errores.length; });
+  const programadas = partidas.filter(function (p) { return p.estado === 'programada'; });
+  const ultimas = partidas
+    .filter(function (p) { return p.estado === 'finalizada' || p.estado === 'cortada'; })
+    .slice(-5).reverse();
+
+  let h = avisoErrores();
+  h += '<h2>Programadas</h2>';
+  h += programadas.length
+    ? programadas.map(tarjetaPartida).join('')
+    : vacio('No hay partidas programadas.' + (esEditor() ? ' Crea una desde «Nueva».' : ''));
+  h += '<h2>Últimos resultados</h2>';
+  h += ultimas.length ? ultimas.map(tarjetaPartida).join('') : vacio('Todavía no hay resultados.');
+  return h;
+}
+
+// ─── Vista: Historial ─────────────────────────────────────────────────────────
+
+function vistaHistorial() {
+  const d = app.datos;
+  const temporadas = Array.from(new Set(
+    d.partidas.filter(function (p) { return esFechaValida(p.fecha); }).map(function (p) { return temporadaDe(p.fecha); })
+  )).sort().reverse();
+  if (app.filtro.temporada === null) {
+    const actual = temporadaDe(hoy());
+    app.filtro.temporada = temporadas.indexOf(actual) !== -1 ? actual : (temporadas[0] || '');
+  }
+
+  let lista = d.partidas.slice().reverse();
+  if (app.filtro.temporada) {
+    lista = lista.filter(function (p) { return esFechaValida(p.fecha) && temporadaDe(p.fecha) === app.filtro.temporada; });
+  }
+  if (app.filtro.jugador) {
+    const id = app.filtro.jugador;
+    lista = lista.filter(function (p) { return [p.a1, p.a2, p.b1, p.b2].indexOf(id) !== -1; });
+  }
+
+  const optTemporadas = '<option value="">Todas las temporadas</option>' + temporadas.map(function (t) {
+    return '<option value="' + esc(t) + '"' + (t === app.filtro.temporada ? ' selected' : '') + '>Temporada ' + esc(t) + '</option>';
+  }).join('');
+  const jugadores = d.jugadores.slice().sort(function (x, y) { return x.nombre.localeCompare(y.nombre, 'es'); });
+  const optJugadores = '<option value="">Todos los jugadores</option>' + jugadores.map(function (j) {
+    return '<option value="' + esc(j.id_jugador) + '"' + (j.id_jugador === app.filtro.jugador ? ' selected' : '') + '>' + esc(j.nombre) + '</option>';
+  }).join('');
+
+  let h = avisoErrores();
+  h += '<div class="filtros">' +
+    '<select data-cambio="temporada" aria-label="Temporada">' + optTemporadas + '</select>' +
+    '<select data-cambio="jugador" aria-label="Jugador">' + optJugadores + '</select></div>';
+  h += '<div class="contador">' + lista.length + (lista.length === 1 ? ' partida' : ' partidas') + '</div>';
+  h += lista.length ? lista.map(tarjetaPartida).join('') : vacio('No hay partidas con estos filtros.');
+  return h;
+}
+
+// ─── Vista: Nueva partida ─────────────────────────────────────────────────────
+
+function vistaNueva() {
+  if (!app.nueva) app.nueva = { fecha: hoy(), seleccion: [], reparto: null };
+  const n = app.nueva;
+  const d = app.datos;
+
+  const activos = d.jugadores
+    .filter(function (j) { return j.activo === true && !j.errores.length; })
+    .sort(function (x, y) {
+      if (x.tipo !== y.tipo) return x.tipo === 'fijo' ? -1 : 1;
+      return x.nombre.localeCompare(y.nombre, 'es');
+    });
+  const hayInvitado = n.seleccion.some(function (id) { return d.jugadoresPorId[id].tipo === 'invitado'; });
+
+  const botones = activos.map(function (j) {
+    const sel = n.seleccion.indexOf(j.id_jugador) !== -1;
+    const bloqueado = !sel && (n.seleccion.length >= 4 || (j.tipo === 'invitado' && hayInvitado));
+    return '<button type="button" class="jug' + (sel ? ' sel' : '') + '" data-accion="elegir" data-id="' + esc(j.id_jugador) + '"' +
+      (bloqueado ? ' disabled' : '') + ' aria-pressed="' + sel + '">' + esc(j.nombre) +
+      (j.tipo === 'invitado' ? '<small>invitado</small>' : '') + '</button>';
+  }).join('');
+
+  let h = '<h2>Nueva partida</h2>';
+  h += '<label class="campo" for="fechaNueva">Fecha</label>' +
+    '<input id="fechaNueva" type="date" value="' + esc(n.fecha) + '" data-cambio="fechaNueva">';
+  h += '<h2>Jugadores (' + n.seleccion.length + ' de 4)</h2><div class="rejilla">' + botones + '</div>';
+
+  if (n.seleccion.length === 4) {
+    h += '<h2>Parejas</h2>';
+    h += generarRepartos(n.seleccion).map(function (r, i) {
+      return '<button type="button" class="reparto' + (n.reparto === i ? ' sel' : '') + '" data-accion="reparto" data-i="' + i + '" aria-pressed="' + (n.reparto === i) + '">' +
+        '<strong>' + esc(nombre(r.a[0])) + ' y ' + esc(nombre(r.a[1])) + '</strong>' +
+        '<span class="vs">contra</span>' +
+        '<strong>' + esc(nombre(r.b[0])) + ' y ' + esc(nombre(r.b[1])) + '</strong></button>';
+    }).join('');
+  }
+
+  h += '<button type="button" class="btn pri" data-accion="guardarNueva"' +
+    (n.reparto === null || app.ocupado ? ' disabled' : '') + '>Guardar partida</button>';
+  return h;
+}
+
+// ─── Vista: Resultado (y edición de una partida) ──────────────────────────────
+
+function abrirEdicion(id) {
+  const p = app.datos.partidas.find(function (x) { return x.id_partida === id; });
+  if (!p) return;
+  const e = {
+    id: p.id_partida, fecha: p.fecha, estadoOriginal: p.estado, notas: p.notas,
+    a1: p.a1, a2: p.a2, b1: p.b1, b2: p.b2
+  };
+  COLS_SET.forEach(function (c) { e[c] = Number.isInteger(p[c]) ? p[c] : null; });
+  app.edicion = e;
+  app.volver = app.vista === 'historial' ? 'historial' : 'inicio';
+  ir('resultado');
+}
+
+function partidaEdicion(estado) {
+  const e = app.edicion;
+  const p = { id_partida: e.id, fecha: e.fecha, estado: estado, a1: e.a1, a2: e.a2, b1: e.b1, b2: e.b2, notas: e.notas };
+  COLS_SET.forEach(function (c) { p[c] = e[c]; });
+  return p;
+}
+
+/** Estado al que se guardaría la partida con el marcador actual, y si se puede guardar. */
+function destinoEdicion() {
+  const e = app.edicion;
+  const p = partidaEdicion('finalizada');
+  if (!hayJuegos(p)) {
+    return { estado: e.estadoOriginal === 'cancelada' ? 'cancelada' : 'programada', valido: true, analisis: null };
+  }
+  const r = analizarSets(p);
+  return { estado: r.errores.length ? null : r.estado, valido: !r.errores.length, analisis: r };
+}
+
+function vistaResultado() {
+  const e = app.edicion;
+  if (!e) { app.vista = app.volver; return vistaInicio(); }
+  const destino = destinoEdicion();
+  const r = destino.analisis;
+
+  let h = '<h2>Resultado</h2>';
+  h += '<label class="campo" for="fechaEdicion">Fecha</label>' +
+    '<input id="fechaEdicion" type="date" value="' + esc(e.fecha) + '" data-cambio="fechaEdicion">';
+  h += '<div class="parejas-res">' +
+    '<div><span class="etq">A</span><strong>' + esc(nombre(e.a1)) + ' y ' + esc(nombre(e.a2)) + '</strong></div>' +
+    '<div><span class="etq">B</span><strong>' + esc(nombre(e.b1)) + ' y ' + esc(nombre(e.b2)) + '</strong></div></div>';
+
+  for (let i = 1; i <= 3; i++) {
+    let nota = '';
+    if (r && r.ganador && r.setDecisivo < i) nota = 'sin decidir';
+    else if (i === 3) nota = 'si se juega';
+    h += '<div class="set"><div class="set-cab">Set ' + i + (nota ? ' <span>' + nota + '</span>' : '') + '</div>';
+    ['a', 'b'].forEach(function (lado) {
+      const campo = 's' + i + '_' + lado;
+      h += '<div class="set-fila"><span class="etq">' + lado.toUpperCase() + '</span>';
+      for (let v = 0; v <= 7; v++) {
+        const sel = e[campo] === v;
+        h += '<button type="button" class="num' + (sel ? ' sel' : '') + '" data-accion="juego" data-campo="' + campo +
+          '" data-v="' + v + '" aria-pressed="' + sel + '" aria-label="Set ' + i + ', pareja ' + lado.toUpperCase() + ': ' + v + '">' + v + '</button>';
+      }
+      h += '</div>';
+    });
+    h += '</div>';
+  }
+
+  // Resumen de lo que se va a guardar
+  if (!r) {
+    h += '<div class="resumen-res">' + (e.estadoOriginal === 'cancelada' ? 'Partida cancelada' : 'Sin resultado: se guardará como programada') + '</div>';
+  } else if (!destino.valido) {
+    h += '<div class="resumen-res error"><ul>' + r.errores.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></div>';
+  } else if (r.estado === 'finalizada') {
+    const ganadores = r.ganador === 'A' ? nombre(e.a1) + ' y ' + nombre(e.a2) : nombre(e.b1) + ' y ' + nombre(e.b2);
+    h += '<div class="resumen-res ok">Finalizada · ganan ' + esc(ganadores) + '</div>';
+  } else {
+    h += '<div class="resumen-res">Cortada · sin ganador</div>';
+  }
+
+  h += '<label class="campo" for="notasEdicion" style="margin-top:14px">Notas (opcional)</label>' +
+    '<input id="notasEdicion" type="text" value="' + esc(e.notas) + '" data-entrada="notas" maxlength="200">';
+
+  const etiqueta = r ? 'Guardar resultado' : 'Guardar';
+  h += '<button type="button" class="btn pri" data-accion="guardarEdicion"' +
+    (!destino.valido || app.ocupado ? ' disabled' : '') + '>' + etiqueta + '</button>';
+
+  h += '<div class="fila-btns">' +
+    '<button type="button" class="btn sec" data-accion="volver">Volver</button>' +
+    '<button type="button" class="btn sec" data-accion="borrarMarcador"' + (r ? '' : ' disabled') + '>Borrar marcador</button></div>';
+
+  if (e.estadoOriginal === 'cancelada') {
+    h += '<button type="button" class="btn sec" data-accion="reactivar"' + (app.ocupado ? ' disabled' : '') + '>Volver a programada</button>';
+  } else {
+    h += '<button type="button" class="btn peligro" data-accion="cancelarPartida"' + (app.ocupado ? ' disabled' : '') + '>Cancelar partida</button>';
+  }
+  h += '<p class="nota-cambio">Para cambiar los jugadores de una partida ya creada, cancélala y crea otra.</p>';
+  return h;
+}
+
+async function guardarEdicion(estado, vaciarSets, mensaje) {
+  const e = app.edicion;
+  const p = partidaEdicion(estado);
+  if (vaciarSets) COLS_SET.forEach(function (c) { p[c] = null; });
+
+  const errores = validarPartida(p, app.datos.jugadoresPorId);
+  if (errores.length) { toast(errores.join(' · '), true); return; }
+
+  const datos = { id_partida: e.id, fecha: p.fecha, estado: p.estado, notas: p.notas };
+  COLS_SET.forEach(function (c) { datos[c] = p[c]; });
+
+  await conOcupado(async function () {
+    const res = await enviar('actualizarPartida', datos);
+    fusionar('partidas', 'id_partida', res.partida);
+    app.edicion = null;
+    app.vista = app.volver;
+    window.scrollTo(0, 0);
+    toast(mensaje || 'Guardado');
+    refrescar();
+  });
+}
+
+// ─── Vista: Jugadores ─────────────────────────────────────────────────────────
+
+function vistaJugadores() {
+  const jugadores = app.datos.jugadores.slice().sort(function (x, y) { return x.id_jugador < y.id_jugador ? -1 : 1; });
+  let h = avisoErrores();
+  h += '<h2>Jugadores</h2>';
+  h += jugadores.map(function (j) {
+    const otroTipo = j.tipo === 'fijo' ? 'invitado' : 'fijo';
+    let chips = '<span class="chip">' + esc(j.tipo) + '</span>';
+    if (j.activo === false) chips += '<span class="chip">inactivo</span>';
+    if (j.errores.length) chips += '<span class="chip chip-error">error</span>';
+    return '<div class="tarjeta"><div class="jugador-fila"><span class="nombre">' + esc(j.nombre) + '</span>' + chips + '</div>' +
+      (j.errores.length ? '<div class="pie-tarjeta error">' + esc(j.errores.join(' · ')) + '</div>' : '') +
+      '<div class="acciones-jug">' +
+      '<button type="button" class="mini" data-accion="renombrar" data-id="' + esc(j.id_jugador) + '"' + (app.ocupado ? ' disabled' : '') + '>Renombrar</button>' +
+      '<button type="button" class="mini" data-accion="activo" data-id="' + esc(j.id_jugador) + '"' + (app.ocupado ? ' disabled' : '') + '>' + (j.activo === false ? 'Activar' : 'Desactivar') + '</button>' +
+      '<button type="button" class="mini" data-accion="tipo" data-id="' + esc(j.id_jugador) + '" data-tipo="' + otroTipo + '"' + (app.ocupado ? ' disabled' : '') + '>Pasar a ' + otroTipo + '</button>' +
+      '</div></div>';
+  }).join('');
+
+  h += '<h2>Añadir jugador</h2>' +
+    '<div class="nuevo-jug">' +
+    '<input id="nuevoNombre" type="text" placeholder="Nombre" maxlength="40" autocomplete="off">' +
+    '<select id="nuevoTipo"><option value="invitado">Invitado</option><option value="fijo">Fijo</option></select></div>' +
+    '<button type="button" class="btn pri" data-accion="crearJugador"' + (app.ocupado ? ' disabled' : '') + '>Añadir</button>' +
+    '<p class="nota-cambio">Desactivar a un jugador lo quita de «Nueva partida», pero conserva su historial.</p>';
+  return h;
+}
+
+async function actualizarJugador(datos, mensaje) {
+  const actual = app.datos.jugadoresPorId[datos.id_jugador];
+  const propuesto = normalizarJugador(Object.assign({}, actual, datos));
+  const errores = validarJugador(propuesto, app.datos.jugadores, datos.id_jugador);
+  if (errores.length) { toast(errores.join(' · '), true); return; }
+  await conOcupado(async function () {
+    const res = await enviar('actualizarJugador', datos);
+    fusionar('jugadores', 'id_jugador', res.jugador);
+    toast(mensaje);
+    refrescar();
+  });
+}
+
+// ─── Acciones (clics) ─────────────────────────────────────────────────────────
+
+const ACCIONES = {
+  reintentar: function () { app.errorCarga = null; pintar(); refrescar(); },
+
+  editar: function (d) { abrirEdicion(d.id); },
+
+  elegir: function (d) {
+    const n = app.nueva;
+    const i = n.seleccion.indexOf(d.id);
+    if (i === -1) { if (n.seleccion.length < 4) n.seleccion.push(d.id); }
+    else n.seleccion.splice(i, 1);
+    n.reparto = null;
+    pintar();
+  },
+
+  reparto: function (d) { app.nueva.reparto = Number(d.i); pintar(); },
+
+  guardarNueva: async function () {
+    const n = app.nueva;
+    const r = generarRepartos(n.seleccion)[n.reparto];
+    const datos = { fecha: n.fecha, estado: 'programada', a1: r.a[0], a2: r.a[1], b1: r.b[0], b2: r.b[1] };
+    const errores = validarPartida(normalizarPartida(datos), app.datos.jugadoresPorId);
+    if (errores.length) { toast(errores.join(' · '), true); return; }
+    await conOcupado(async function () {
+      const res = await enviar('crearPartida', datos);
+      fusionar('partidas', 'id_partida', res.partida);
+      app.nueva = null;
+      app.vista = 'inicio';
+      window.scrollTo(0, 0);
+      toast('Partida programada');
+      refrescar();
+    });
+  },
+
+  juego: function (d) {
+    const v = Number(d.v);
+    app.edicion[d.campo] = app.edicion[d.campo] === v ? null : v;
+    pintar();
+  },
+
+  borrarMarcador: function () {
+    COLS_SET.forEach(function (c) { app.edicion[c] = null; });
+    pintar();
+  },
+
+  guardarEdicion: function () {
+    const destino = destinoEdicion();
+    if (!destino.valido) return;
+    guardarEdicion(destino.estado, false, destino.estado === 'programada' ? 'Guardada como programada' : 'Resultado guardado');
+  },
+
+  cancelarPartida: function () {
+    if (!confirm('¿Cancelar esta partida? Se borrará su marcador.')) return;
+    guardarEdicion('cancelada', true, 'Partida cancelada');
+  },
+
+  reactivar: function () { guardarEdicion('programada', true, 'Partida programada de nuevo'); },
+
+  volver: function () { app.edicion = null; ir(app.volver); },
+
+  renombrar: function (d) {
+    const j = app.datos.jugadoresPorId[d.id];
+    const nuevo = prompt('Nuevo nombre para ' + j.nombre, j.nombre);
+    if (nuevo === null || nuevo.trim() === '' || nuevo.trim() === j.nombre) return;
+    actualizarJugador({ id_jugador: d.id, nombre: nuevo.trim() }, 'Nombre cambiado');
+  },
+
+  activo: function (d) {
+    const j = app.datos.jugadoresPorId[d.id];
+    const activo = j.activo === false;
+    actualizarJugador({ id_jugador: d.id, activo: activo }, j.nombre + (activo ? ' activado' : ' desactivado'));
+  },
+
+  tipo: function (d) {
+    const j = app.datos.jugadoresPorId[d.id];
+    if (!confirm('¿Pasar a ' + j.nombre + ' a ' + d.tipo + '? Cambiará cómo cuentan sus partidas en las estadísticas.')) return;
+    actualizarJugador({ id_jugador: d.id, tipo: d.tipo }, j.nombre + ' es ahora ' + d.tipo);
+  },
+
+  crearJugador: async function () {
+    const nombreNuevo = document.getElementById('nuevoNombre').value.trim();
+    const tipo = document.getElementById('nuevoTipo').value;
+    const propuesto = normalizarJugador({ nombre: nombreNuevo, tipo: tipo, activo: true, fecha_alta: hoy() });
+    const errores = validarJugador(propuesto, app.datos.jugadores, null);
+    if (errores.length) { toast(errores.join(' · '), true); return; }
+    await conOcupado(async function () {
+      const res = await enviar('crearJugador', { nombre: nombreNuevo, tipo: tipo, fecha_alta: hoy() });
+      fusionar('jugadores', 'id_jugador', res.jugador);
+      toast(res.jugador.nombre + ' añadido');
+      refrescar();
+    });
+  }
+};
+
+const CAMBIOS = {
+  temporada: function (v) { app.filtro.temporada = v; pintar(); },
+  jugador: function (v) { app.filtro.jugador = v; pintar(); },
+  fechaNueva: function (v) { app.nueva.fecha = v; },
+  fechaEdicion: function (v) { app.edicion.fecha = v; }
+};
+
+const ENTRADAS = {
+  notas: function (v) { app.edicion.notas = v; }
+};
+
+// ─── Eventos ──────────────────────────────────────────────────────────────────
+
+const vista = document.getElementById('vista');
+
+vista.addEventListener('click', function (ev) {
+  const el = ev.target.closest('[data-accion]');
+  if (!el || el.disabled) return;
+  const accion = ACCIONES[el.dataset.accion];
+  if (accion) accion(el.dataset);
+});
+
+vista.addEventListener('keydown', function (ev) {
+  if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.matches('[role="button"][data-accion]')) {
+    ev.preventDefault();
+    ev.target.click();
+  }
+});
+
+vista.addEventListener('change', function (ev) {
+  const el = ev.target.closest('[data-cambio]');
+  if (el && CAMBIOS[el.dataset.cambio]) CAMBIOS[el.dataset.cambio](el.value);
+});
+
+vista.addEventListener('input', function (ev) {
+  const el = ev.target.closest('[data-entrada]');
+  if (el && ENTRADAS[el.dataset.entrada]) ENTRADAS[el.dataset.entrada](el.value);
+});
+
+document.querySelectorAll('nav.nav button').forEach(function (b) {
+  b.addEventListener('click', function () {
+    if (app.vista === 'resultado') app.edicion = null;
+    ir(b.dataset.ir);
+  });
+});
+
+// PIN
+const dlgPin = document.getElementById('dlgPin');
+
+document.getElementById('btnEditor').addEventListener('click', function () {
+  if (esEditor()) {
+    if (!confirm('¿Salir del modo editor? Tendrás que volver a introducir el PIN.')) return;
+    app.pin = null;
+    borrar(CLAVE_PIN);
+    app.edicion = null;
+    app.nueva = null;
+    pintar();
+    return;
+  }
+  document.getElementById('inpPin').value = '';
+  document.getElementById('errPin').textContent = '';
+  dlgPin.showModal();
+  document.getElementById('inpPin').focus();
+});
+
+document.getElementById('pinCancelar').addEventListener('click', function () { dlgPin.close(); });
+
+document.getElementById('formPin').addEventListener('submit', async function (ev) {
+  ev.preventDefault();
+  const pin = document.getElementById('inpPin').value.trim();
+  const err = document.getElementById('errPin');
+  const boton = document.getElementById('pinEntrar');
+  if (!pin) { err.textContent = 'Escribe el PIN'; return; }
+  boton.disabled = true;
+  err.textContent = 'Comprobando…';
+  try {
+    await enviar('comprobarPin', {}, pin);
+    app.pin = pin;
+    guardar(CLAVE_PIN, pin);
+    dlgPin.close();
+    pintar();
+    toast('Modo editor activado');
+  } catch (e) {
+    err.textContent = e.message;
+  } finally {
+    boton.disabled = false;
+  }
+});
+
+// Al volver a la app (por ejemplo, desde otra pestaña), refresca si los datos son viejos.
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible' && !app.actualizando && !app.ocupado &&
+      Date.now() - app.ultimoRefresco > REFRESCO_MIN_MS) {
+    refrescar();
+  }
+});
+
+// ─── Arranque: pinta desde la caché y refresca ────────────────────────────────
+
+(function arrancar() {
+  const cache = leer(CLAVE_DATOS);
+  if (cache) aplicarCrudo(cache);
+  pintar();
+  refrescar();
+})();
+</script>
+</body>
+</html>
