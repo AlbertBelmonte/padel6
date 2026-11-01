@@ -258,6 +258,108 @@ function generarRepartos(ids) {
   ];
 }
 
+// ─── Propuesta de parejas ─────────────────────────────────────────────────────
+
+const PESO_COMPANERO = 10; // w_c: manda no repetir compañero…
+const PESO_RIVAL = 1;      // w_r: …y los rivales solo desempatan
+
+/** Clave de una pareja, sin orden: 'J01-J04'. */
+function clavePareja(x, y) {
+  return x < y ? x + '-' + y : y + '-' + x;
+}
+
+/**
+ * Cuenta cuántas veces ha jugado cada par de fijos como compañeros y como rivales.
+ * Cuentan las partidas programadas, finalizadas y cortadas sin errores (lo que se equilibra
+ * es haber jugado, no el resultado). Las canceladas no cuentan. Los pares con un invitado no se cuentan.
+ * Devuelve { juntos: { clave: n }, rivales: { clave: n }, ultimaJuntos: { clave: 'aaaa-mm-dd' } }.
+ */
+function contarEmparejamientos(partidas, jugadoresPorId) {
+  const juntos = {};
+  const rivales = {};
+  const ultimaJuntos = {};
+  const esFijo = function (id) { return !!jugadoresPorId[id] && jugadoresPorId[id].tipo === 'fijo'; };
+  const sumar = function (mapa, x, y) {
+    if (!esFijo(x) || !esFijo(y)) return null;
+    const k = clavePareja(x, y);
+    mapa[k] = (mapa[k] || 0) + 1;
+    return k;
+  };
+
+  partidas.forEach(function (p) {
+    if (['programada', 'finalizada', 'cortada'].indexOf(p.estado) === -1) return;
+    if (p.errores && p.errores.length) return;
+    [[p.a1, p.a2], [p.b1, p.b2]].forEach(function (par) {
+      const k = sumar(juntos, par[0], par[1]);
+      if (k && (!ultimaJuntos[k] || p.fecha > ultimaJuntos[k])) ultimaJuntos[k] = p.fecha;
+    });
+    [p.a1, p.a2].forEach(function (x) {
+      [p.b1, p.b2].forEach(function (y) { sumar(rivales, x, y); });
+    });
+  });
+  return { juntos: juntos, rivales: rivales, ultimaJuntos: ultimaJuntos };
+}
+
+/**
+ * Coste de un reparto { a: [x, y], b: [z, w] }:
+ *   coste = w_c · (J(a1,a2) + J(b1,b2)) + w_r · Σ R(x, y) para x en A, y en B
+ * Los pares con un invitado cuestan 0 y no salen en el desglose.
+ * Devuelve { coste, companeros: [{ x, y, veces }], rivales: [{ x, y, veces }] }.
+ */
+function costeReparto(reparto, conteo, jugadoresPorId, pesos) {
+  const wc = pesos && pesos.companero !== undefined ? pesos.companero : PESO_COMPANERO;
+  const wr = pesos && pesos.rival !== undefined ? pesos.rival : PESO_RIVAL;
+  const esFijo = function (id) { return !!jugadoresPorId[id] && jugadoresPorId[id].tipo === 'fijo'; };
+
+  const companeros = [reparto.a, reparto.b]
+    .filter(function (par) { return esFijo(par[0]) && esFijo(par[1]); })
+    .map(function (par) { return { x: par[0], y: par[1], veces: conteo.juntos[clavePareja(par[0], par[1])] || 0 }; });
+
+  const rivales = [];
+  reparto.a.forEach(function (x) {
+    reparto.b.forEach(function (y) {
+      if (esFijo(x) && esFijo(y)) rivales.push({ x: x, y: y, veces: conteo.rivales[clavePareja(x, y)] || 0 });
+    });
+  });
+
+  const suma = function (lista) { return lista.reduce(function (s, e) { return s + e.veces; }, 0); };
+  return { coste: wc * suma(companeros) + wr * suma(rivales), companeros: companeros, rivales: rivales };
+}
+
+/**
+ * Los 3 repartos de 4 jugadores, ordenados de menor a mayor coste.
+ * Desempate 1: va antes el reparto cuyas parejas llevan más tiempo sin jugar juntas
+ *   (se compara la fecha más reciente en que jugó junta alguna de sus dos parejas; nunca = la más antigua).
+ * Desempate 2: al azar. `aleatorio` es una función que devuelve un número en [0, 1); por defecto Math.random.
+ * Devuelve [{ reparto, indice, coste, companeros, rivales, ultimaJuntos }], donde indice es la posición en generarRepartos.
+ */
+function proponerRepartos(ids, conteo, jugadoresPorId, pesos, aleatorio) {
+  const azar = aleatorio || Math.random;
+  const esFijo = function (id) { return !!jugadoresPorId[id] && jugadoresPorId[id].tipo === 'fijo'; };
+
+  const opciones = generarRepartos(ids).map(function (reparto, indice) {
+    const c = costeReparto(reparto, conteo, jugadoresPorId, pesos);
+    let ultima = '';
+    [reparto.a, reparto.b].forEach(function (par) {
+      if (!esFijo(par[0]) || !esFijo(par[1])) return;
+      const f = conteo.ultimaJuntos[clavePareja(par[0], par[1])] || '';
+      if (f > ultima) ultima = f;
+    });
+    return {
+      reparto: reparto, indice: indice, coste: c.coste, companeros: c.companeros, rivales: c.rivales,
+      ultimaJuntos: ultima, _azar: azar()
+    };
+  });
+
+  opciones.sort(function (x, y) {
+    if (x.coste !== y.coste) return x.coste - y.coste;
+    if (x.ultimaJuntos !== y.ultimaJuntos) return x.ultimaJuntos < y.ultimaJuntos ? -1 : 1;
+    return x._azar - y._azar;
+  });
+  opciones.forEach(function (o) { delete o._azar; });
+  return opciones;
+}
+
 // ─── ELO ──────────────────────────────────────────────────────────────────────
 
 const ELO_INICIAL = 1000;
@@ -353,6 +455,165 @@ function rankingElo(elo, jugadores, minimo) {
   const fuera = filas.filter(function (f) { return f.faltan > 0; }).sort(porElo);
   dentro.forEach(function (f, i) { f.posicion = i + 1; });
   return dentro.concat(fuera);
+}
+
+// ─── Periodos ─────────────────────────────────────────────────────────────────
+
+/**
+ * Filtra partidas por periodo. `hoy` es 'aaaa-mm-dd' (se pasa como parámetro para que sea una función pura).
+ * periodo: { tipo: 'todo' } | { tipo: 'temporada', valor: '2026-27' } | { tipo: 'meses', valor: 3 }
+ * 'meses' incluye desde la misma fecha de hace N meses en adelante.
+ */
+function filtrarPeriodo(partidas, periodo, hoy) {
+  if (!periodo || periodo.tipo === 'todo') return partidas.slice();
+  if (periodo.tipo === 'temporada') {
+    return partidas.filter(function (p) { return esFechaValida(p.fecha) && temporadaDe(p.fecha) === periodo.valor; });
+  }
+  if (periodo.tipo === 'meses') {
+    const a = parseInt(hoy.slice(0, 4), 10);
+    const m = parseInt(hoy.slice(5, 7), 10);
+    const d = parseInt(hoy.slice(8, 10), 10);
+    const desde = new Date(Date.UTC(a, m - 1 - periodo.valor, d)).toISOString().slice(0, 10);
+    return partidas.filter(function (p) { return esFechaValida(p.fecha) && p.fecha >= desde; });
+  }
+  throw new Error('Periodo desconocido: ' + periodo.tipo);
+}
+
+// ─── Estadísticas individuales ────────────────────────────────────────────────
+
+const MINIMO_CRUCE = 3; // partidas para mejor/peor compañero y bestia negra/víctima favorita
+
+function porcentaje(a, total) { return total > 0 ? a / total : null; }
+
+/**
+ * Estadísticas de un jugador sobre las partidas dadas (ya filtradas por periodo).
+ * Usa las partidas finalizadas y cortadas sin errores. Ver la tabla de métricas del documento de contexto.
+ * Los porcentajes van de 0 a 1, o null si no hay datos.
+ */
+function statsJugador(id, partidas, jugadoresPorId, opciones) {
+  const minimo = opciones && opciones.minimo !== undefined ? opciones.minimo : MINIMO_CRUCE;
+  const esFijo = function (x) { return !!jugadoresPorId[x] && jugadoresPorId[x].tipo === 'fijo'; };
+
+  const jugadasGrupo = partidas
+    .filter(function (p) { return (p.estado === 'finalizada' || p.estado === 'cortada') && (!p.errores || !p.errores.length); })
+    .slice()
+    .sort(compararPartidas);
+  const suyas = jugadasGrupo.filter(function (p) { return [p.a1, p.a2, p.b1, p.b2].indexOf(id) !== -1; });
+
+  const s = {
+    id: id,
+    partidas: suyas.length, finalizadas: 0, cortadas: 0,
+    asistencia: { partidas: suyas.length, totalGrupo: jugadasGrupo.length, pct: porcentaje(suyas.length, jugadasGrupo.length) },
+    victorias: 0, derrotas: 0, pctVictorias: null,
+    setsGanados: 0, setsPerdidos: 0,
+    juegosGanados: 0, juegosPerdidos: 0, pctJuegos: null, difJuegosPorPartida: null,
+    tiebreaksGanados: 0, tiebreaksPerdidos: 0,
+    a3Sets: { jugadas: 0, ganadas: 0, pct: null },
+    remontadas: 0,
+    roscosDados: 0, roscosRecibidos: 0,
+    rachaActual: null, rachaMaxVictorias: 0, rachaMaxDerrotas: 0,
+    forma: [],
+    companeros: [], mejorCompanero: null, peorCompanero: null,
+    rivales: [], bestiaNegra: null, victimaFavorita: null
+  };
+
+  const comp = {};
+  const riv = {};
+  let racha = null;
+
+  suyas.forEach(function (p) {
+    const r = analizarSets(p);
+    const enA = p.a1 === id || p.a2 === id;
+    const companero = enA ? (p.a1 === id ? p.a2 : p.a1) : (p.b1 === id ? p.b2 : p.b1);
+    const contrarios = enA ? [p.b1, p.b2] : [p.a1, p.a2];
+
+    // Sets y juegos: todos los sets jugados, también el set sin decidir
+    r.sets.forEach(function (set) {
+      const mios = enA ? set.a : set.b;
+      const suyos = enA ? set.b : set.a;
+      s.juegosGanados += mios;
+      s.juegosPerdidos += suyos;
+      if (!set.completo) return;
+      if (mios > suyos) s.setsGanados++; else s.setsPerdidos++;
+      if (Math.max(mios, suyos) === 7 && Math.min(mios, suyos) === 6) {
+        if (mios > suyos) s.tiebreaksGanados++; else s.tiebreaksPerdidos++;
+      }
+      if (mios === 6 && suyos === 0) s.roscosDados++;
+      if (mios === 0 && suyos === 6) s.roscosRecibidos++;
+    });
+
+    if (p.estado === 'cortada') {
+      s.cortadas++;
+      s.forma.push('C');
+      return; // las cortadas no cuentan para victorias, rachas, cruces ni partidas a 3 sets
+    }
+
+    s.finalizadas++;
+    const gano = r.ganador === (enA ? 'A' : 'B');
+    if (gano) s.victorias++; else s.derrotas++;
+    s.forma.push(gano ? 'V' : 'D');
+
+    if (r.setDecisivo === 3) {
+      s.a3Sets.jugadas++;
+      if (gano) s.a3Sets.ganadas++;
+    }
+    const primero = r.sets[0];
+    if (gano && primero && primero.num === 1 && (enA ? primero.a < primero.b : primero.b < primero.a)) s.remontadas++;
+
+    const tipo = gano ? 'V' : 'D';
+    racha = racha && racha.tipo === tipo ? { tipo: tipo, n: racha.n + 1 } : { tipo: tipo, n: 1 };
+    if (tipo === 'V') s.rachaMaxVictorias = Math.max(s.rachaMaxVictorias, racha.n);
+    else s.rachaMaxDerrotas = Math.max(s.rachaMaxDerrotas, racha.n);
+
+    if (esFijo(companero)) {
+      comp[companero] = comp[companero] || { id: companero, partidas: 0, victorias: 0 };
+      comp[companero].partidas++;
+      if (gano) comp[companero].victorias++;
+    }
+    contrarios.forEach(function (x) {
+      if (!esFijo(x)) return;
+      riv[x] = riv[x] || { id: x, partidas: 0, victorias: 0 };
+      riv[x].partidas++;
+      if (gano) riv[x].victorias++;
+    });
+  });
+
+  s.pctVictorias = porcentaje(s.victorias, s.victorias + s.derrotas);
+  s.pctJuegos = porcentaje(s.juegosGanados, s.juegosGanados + s.juegosPerdidos);
+  s.difJuegosPorPartida = s.partidas ? (s.juegosGanados - s.juegosPerdidos) / s.partidas : null;
+  s.a3Sets.pct = porcentaje(s.a3Sets.ganadas, s.a3Sets.jugadas);
+  s.rachaActual = racha;
+  s.forma = s.forma.slice(-5);
+
+  const nombre = function (x) { return jugadoresPorId[x] ? jugadoresPorId[x].nombre : x; };
+  const cerrar = function (mapa) {
+    return Object.keys(mapa).map(function (k) {
+      const e = mapa[k];
+      e.pct = porcentaje(e.victorias, e.partidas);
+      return e;
+    }).sort(function (x, y) {
+      return y.pct - x.pct || y.partidas - x.partidas || (nombre(x.id) < nombre(y.id) ? -1 : 1);
+    });
+  };
+  s.companeros = cerrar(comp);
+  s.rivales = cerrar(riv);
+
+  const validos = function (lista) { return lista.filter(function (e) { return e.partidas >= minimo; }); };
+  const compValidos = validos(s.companeros);
+  if (compValidos.length) s.mejorCompanero = compValidos[0];
+  if (compValidos.length >= 2) s.peorCompanero = compValidos[compValidos.length - 1];
+
+  const rivValidos = validos(s.rivales);
+  const victima = rivValidos.filter(function (e) { return e.pct > 0.5; });
+  const bestia = rivValidos.filter(function (e) { return e.pct < 0.5; });
+  if (victima.length) s.victimaFavorita = victima[0];
+  if (bestia.length) {
+    // la bestia negra es contra quien peor le va; con empate, contra quien más ha jugado
+    s.bestiaNegra = bestia.slice().sort(function (x, y) {
+      return x.pct - y.pct || y.partidas - x.partidas || (nombre(x.id) < nombre(y.id) ? -1 : 1);
+    })[0];
+  }
+  return s;
 }
 
 // ─── Orden y carga ────────────────────────────────────────────────────────────

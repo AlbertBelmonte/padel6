@@ -139,6 +139,47 @@
   .fila-rk.fuera { opacity: .5; }
   .fila-rk.fuera .rk-elo { font-size: 17px; font-weight: 600; }
   .nota-rk { font-size: 12px; color: var(--suave); margin: 6px 2px 0; }
+  .fila-rk[role="button"] { cursor: pointer; }
+  .fila-rk[role="button"]:active { background: var(--superficie-2); }
+  .fila-rk .flecha { color: var(--suave); font-size: 18px; margin-left: -4px; }
+
+  /* Ficha de jugador */
+  .ficha-top { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+  .ficha-top .quien { flex: 1; min-width: 0; }
+  .ficha-top h3 { margin: 0; font-size: 22px; }
+  .ficha-top .quien span { font-size: 13px; color: var(--suave); }
+  .elo-grande { text-align: right; font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+  .elo-grande small { display: block; font-size: 11px; font-weight: 600; color: var(--suave); letter-spacing: .06em; margin-top: 4px; }
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .tile { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: 10px 12px; }
+  .tile .etq-tile { font-size: 12px; color: var(--suave); }
+  .tile .valor { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .tile .sub { font-size: 12px; color: var(--suave); }
+  .forma { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .forma .f {
+    width: 32px; height: 32px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 14px; background: var(--superficie-2); color: var(--suave);
+  }
+  .forma .f.V { background: var(--acento); color: var(--acento-texto); }
+  .forma .f.D { background: var(--peligro-suave); color: var(--peligro); }
+  .forma .texto-racha { font-size: 13px; color: var(--suave); margin-left: 4px; }
+  .lista-datos { margin: 0; padding: 0; }
+  .lista-datos div { display: flex; justify-content: space-between; gap: 12px; padding: 9px 14px; border-top: 1px solid var(--borde); font-size: 15px; }
+  .lista-datos div:first-child { border-top: 0; }
+  .lista-datos dt { color: var(--suave); }
+  .lista-datos dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+  .destacados { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+  .destacado { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: 10px 12px; }
+  .destacado .etq-tile { font-size: 12px; color: var(--suave); }
+  .destacado strong { display: block; font-size: 17px; }
+  .destacado span { font-size: 13px; color: var(--suave); }
+  .cruces { padding: 2px 0; }
+  .cruce { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-top: 1px solid var(--borde); font-size: 15px; }
+  .cruce:first-child { border-top: 0; }
+  .cruce .n { flex: 1; font-weight: 600; }
+  .cruce .c { color: var(--suave); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .cruce .p { min-width: 48px; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .cruce.pocas { opacity: .55; }
 
   /* Formularios */
   label.campo { display: block; font-size: 13px; color: var(--suave); margin-bottom: 4px; }
@@ -174,7 +215,12 @@
   }
   .reparto.sel { border-color: var(--acento); background: var(--acento-suave); }
   .reparto .vs { display: block; font-size: 12px; color: var(--suave); margin: 2px 0; }
-  .reparto strong { display: block; }
+  .reparto .rp-pareja { display: block; }
+  .reparto .rp-pareja strong { font-weight: 700; }
+  .reparto .rp-pareja small { color: var(--suave); font-size: 13px; margin-left: 6px; }
+  .reparto .rp-cab { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; min-height: 22px; }
+  .reparto .rp-coste { font-size: 12px; color: var(--suave); font-variant-numeric: tabular-nums; margin-left: auto; }
+  .reparto .rp-det { display: block; font-size: 12px; color: var(--suave); margin-top: 8px; line-height: 1.5; }
 
   /* Resultado */
   .parejas-res { display: grid; gap: 4px; margin-top: 12px; }
@@ -306,6 +352,9 @@ const app = {
   volver: 'inicio',     // vista a la que se vuelve al salir de Resultado
   ocupado: false,       // hay una escritura en curso
   filtro: { temporada: null, jugador: '' },
+  fichaId: null,        // jugador que se ve en la ficha
+  volverFicha: 'inicio',
+  periodo: null,        // 'temporada:2026-27', 'meses:3' o 'todo'; por defecto, la temporada actual
   nueva: null,          // { fecha, seleccion: [ids], reparto: índice o null }
   edicion: null         // partida que se está editando en Resultado
 };
@@ -463,7 +512,9 @@ function pintar() {
 
   if (VISTAS_EDITOR.indexOf(app.vista) !== -1 && !esEditor()) app.vista = 'inicio';
   document.querySelectorAll('nav.nav button').forEach(function (b) {
-    const activa = b.dataset.ir === app.vista || (app.vista === 'resultado' && b.dataset.ir === app.volver);
+    const activa = b.dataset.ir === app.vista ||
+      (app.vista === 'resultado' && b.dataset.ir === app.volver) ||
+      (app.vista === 'jugador' && b.dataset.ir === app.volverFicha);
     b.classList.toggle('activa', activa);
   });
 
@@ -477,7 +528,10 @@ function pintar() {
       : '<p class="vacio">Cargando…</p>';
     return;
   }
-  const vistas = { inicio: vistaInicio, historial: vistaHistorial, nueva: vistaNueva, resultado: vistaResultado, jugadores: vistaJugadores };
+  const vistas = {
+    inicio: vistaInicio, historial: vistaHistorial, nueva: vistaNueva, resultado: vistaResultado,
+    jugadores: vistaJugadores, jugador: vistaJugador
+  };
   v.innerHTML = vistas[app.vista]();
 }
 
@@ -577,17 +631,139 @@ function tablaRanking() {
     }
     const detalle = f.partidas + (f.partidas === 1 ? ' partida' : ' partidas') +
       (fuera ? ' · faltan ' + f.faltan + ' para clasificar' : '');
-    return '<li class="fila-rk' + (fuera ? ' fuera' : '') + '">' +
+    return '<li class="fila-rk' + (fuera ? ' fuera' : '') + '" role="button" tabindex="0" data-accion="ficha" data-id="' + esc(f.id) + '">' +
       '<span class="pos">' + (fuera ? '–' : f.posicion) + '</span>' +
       '<span class="rk-nombre">' + esc(f.nombre) + '<small>' + detalle + '</small></span>' +
       delta +
-      '<span class="rk-elo">' + Math.round(f.elo) + '</span></li>';
+      '<span class="rk-elo">' + Math.round(f.elo) + '</span><span class="flecha" aria-hidden="true">›</span></li>';
   }).join('');
 
   const contadas = app.elo.historial.length;
   return '<div class="tarjeta ranking"><ol>' + items + '</ol></div>' +
     '<p class="nota-rk">' + contadas + (contadas === 1 ? ' partida finalizada' : ' partidas finalizadas') +
     ' desde el 31 ago 2026. Mínimo ' + MINIMO_RANKING + ' para clasificar. Diferencias de menos de 15 puntos no son significativas.</p>';
+}
+
+// ─── Vista: Ficha de jugador ──────────────────────────────────────────────────
+
+const MESES_RECIENTES = 3;
+
+function periodoDe(valor) {
+  if (valor === 'todo') return { tipo: 'todo' };
+  if (valor.indexOf('meses:') === 0) return { tipo: 'meses', valor: parseInt(valor.slice(6), 10) };
+  return { tipo: 'temporada', valor: valor.slice('temporada:'.length) };
+}
+
+function pct(x) { return x === null ? '–' : Math.round(x * 100) + ' %'; }
+
+function deTotal(a, b) { return a + ' de ' + b; }
+
+function vistaJugador() {
+  const d = app.datos;
+  const j = d.jugadoresPorId[app.fichaId];
+  if (!j) { app.vista = 'inicio'; return vistaInicio(); }
+
+  const actual = temporadaDe(hoy());
+  if (!app.periodo) app.periodo = 'temporada:' + actual;
+
+  // Selector de periodo: temporadas con partidas (y la actual), últimos meses y todo
+  const temporadas = Array.from(new Set(
+    d.partidas.filter(function (p) { return esFechaValida(p.fecha); }).map(function (p) { return temporadaDe(p.fecha); }).concat([actual])
+  )).sort().reverse();
+  const opciones = temporadas.map(function (t) { return ['temporada:' + t, 'Temporada ' + t]; })
+    .concat([['meses:' + MESES_RECIENTES, 'Últimos ' + MESES_RECIENTES + ' meses'], ['todo', 'Todo el histórico']]);
+  const selector = '<select data-cambio="periodo" aria-label="Periodo" style="margin-top:12px">' +
+    opciones.map(function (o) {
+      return '<option value="' + esc(o[0]) + '"' + (o[0] === app.periodo ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
+    }).join('') + '</select>';
+
+  // Cabecera con el ELO actual (siempre del histórico completo)
+  const rk = rankingElo(app.elo, d.jugadores, MINIMO_RANKING);
+  const fila = rk.find(function (f) { return f.id === j.id_jugador; });
+  const clasificados = rk.filter(function (f) { return f.posicion !== null; }).length;
+  let info = '';
+  if (j.tipo !== 'fijo') info = 'Invitado · sin ELO ni ranking';
+  else if (!fila) info = 'Inactivo';
+  else if (fila.posicion === null) info = 'Sin clasificar · faltan ' + fila.faltan + ' partidas';
+  else info = fila.posicion + 'º de ' + clasificados + ' en el ranking';
+
+  let h = '<button type="button" class="mini" data-accion="volverFicha" style="margin-top:12px">‹ Volver</button>';
+  h += '<div class="tarjeta ficha-top"><div class="quien"><h3>' + esc(j.nombre) + '</h3><span>' + esc(info) + '</span></div>' +
+    (app.elo.ratings[j.id_jugador] !== undefined
+      ? '<div class="elo-grande">' + Math.round(app.elo.ratings[j.id_jugador]) + '<small>ELO</small></div>' : '') +
+    '</div>';
+  h += selector;
+
+  const s = statsJugador(j.id_jugador, filtrarPeriodo(d.partidas, periodoDe(app.periodo), hoy()), d.jugadoresPorId, { minimo: MINIMO_CRUCE });
+  if (!s.partidas) return h + vacio('No ha jugado ninguna partida en este periodo.');
+
+  // Resumen
+  const dif = s.difJuegosPorPartida;
+  h += '<h2>Resumen</h2><div class="tiles">' +
+    tile('Partidas', s.partidas, pct(s.asistencia.pct) + ' de las del grupo') +
+    tile('Victorias', s.victorias + '–' + s.derrotas, (s.finalizadas ? pct(s.pctVictorias) + ' de victorias' : 'sin partidas finalizadas')) +
+    tile('Juegos', pct(s.pctJuegos), s.juegosGanados + '–' + s.juegosPerdidos) +
+    tile('Diferencia de juegos', (dif > 0 ? '+' : (dif < 0 ? '−' : '')) + Math.abs(dif).toFixed(1).replace('.', ','), 'por partida') +
+    '</div>';
+
+  // Forma y rachas
+  h += '<h2>Forma</h2><div class="tarjeta"><div class="forma">' +
+    s.forma.map(function (x) { return '<span class="f ' + x + '" title="' + ({ V: 'Victoria', D: 'Derrota', C: 'Cortada' })[x] + '">' + x + '</span>'; }).join('') +
+    '<span class="texto-racha">' + textoRacha(s.rachaActual) + '</span></div>' +
+    '<div class="pie-tarjeta">Mejor racha: ' + s.rachaMaxVictorias + (s.rachaMaxVictorias === 1 ? ' victoria' : ' victorias') +
+    ' · Peor racha: ' + s.rachaMaxDerrotas + (s.rachaMaxDerrotas === 1 ? ' derrota' : ' derrotas') +
+    ' · Últimas 5 partidas, la más reciente a la derecha</div></div>';
+
+  // Detalle
+  const datos = [
+    ['Sets ganados – perdidos', s.setsGanados + ' – ' + s.setsPerdidos],
+    ['Tie-breaks ganados – perdidos', s.tiebreaksGanados + ' – ' + s.tiebreaksPerdidos],
+    ['Partidas a 3 sets ganadas', s.a3Sets.jugadas ? deTotal(s.a3Sets.ganadas, s.a3Sets.jugadas) : '–'],
+    ['Remontadas', s.remontadas],
+    ['Roscos dados – recibidos', s.roscosDados + ' – ' + s.roscosRecibidos]
+  ];
+  if (s.cortadas) datos.push(['Partidas cortadas', s.cortadas]);
+  h += '<h2>Detalle</h2><div class="tarjeta" style="padding:0"><dl class="lista-datos">' +
+    datos.map(function (x) { return '<div><dt>' + esc(x[0]) + '</dt><dd>' + esc(x[1]) + '</dd></div>'; }).join('') + '</dl></div>';
+
+  // Compañeros y rivales
+  h += '<h2>Compañeros</h2>' +
+    destacados([['Mejor compañero', s.mejorCompanero], ['Peor compañero', s.peorCompanero]]) +
+    tablaCruces(s.companeros);
+  h += '<h2>Rivales</h2>' +
+    destacados([['Víctima favorita', s.victimaFavorita], ['Bestia negra', s.bestiaNegra]]) +
+    tablaCruces(s.rivales);
+  h += '<p class="nota-rk">Victorias con cada compañero y contra cada rival, en partidas finalizadas. Mejor y peor compañero, bestia negra y víctima favorita necesitan ' +
+    MINIMO_CRUCE + ' partidas; las filas atenuadas no llegan. Las partidas con invitado cuentan en lo individual, pero no aquí.</p>';
+  return h;
+}
+
+function tile(etiqueta, valor, sub) {
+  return '<div class="tile"><div class="etq-tile">' + esc(etiqueta) + '</div><div class="valor">' + esc(valor) +
+    '</div><div class="sub">' + esc(sub) + '</div></div>';
+}
+
+function textoRacha(r) {
+  if (!r) return 'Sin racha';
+  if (r.tipo === 'V') return 'Racha: ' + r.n + (r.n === 1 ? ' victoria' : ' victorias');
+  return 'Racha: ' + r.n + (r.n === 1 ? ' derrota' : ' derrotas');
+}
+
+function destacados(lista) {
+  return '<div class="destacados">' + lista.map(function (x) {
+    const e = x[1];
+    return '<div class="destacado"><div class="etq-tile">' + esc(x[0]) + '</div>' +
+      (e ? '<strong>' + esc(nombre(e.id)) + '</strong><span>' + deTotal(e.victorias, e.partidas) + ' · ' + pct(e.pct) + '</span>'
+         : '<strong>–</strong><span>nadie cumple</span>') + '</div>';
+  }).join('') + '</div>';
+}
+
+function tablaCruces(lista) {
+  if (!lista.length) return vacio('Sin partidas finalizadas en este periodo.');
+  return '<div class="tarjeta cruces" style="padding:0">' + lista.map(function (e) {
+    return '<div class="cruce' + (e.partidas < MINIMO_CRUCE ? ' pocas' : '') + '"><span class="n">' + esc(nombre(e.id)) + '</span>' +
+      '<span class="c">' + deTotal(e.victorias, e.partidas) + '</span><span class="p">' + pct(e.pct) + '</span></div>';
+  }).join('') + '</div>';
 }
 
 // ─── Vista: Historial ─────────────────────────────────────────────────────────
@@ -631,7 +807,7 @@ function vistaHistorial() {
 // ─── Vista: Nueva partida ─────────────────────────────────────────────────────
 
 function vistaNueva() {
-  if (!app.nueva) app.nueva = { fecha: hoy(), seleccion: [], reparto: null };
+  if (!app.nueva) app.nueva = { fecha: hoy(), seleccion: [], propuesta: null, reparto: null };
   const n = app.nueva;
   const d = app.datos;
 
@@ -656,19 +832,43 @@ function vistaNueva() {
     '<input id="fechaNueva" type="date" value="' + esc(n.fecha) + '" data-cambio="fechaNueva">';
   h += '<h2>Jugadores (' + n.seleccion.length + ' de 4)</h2><div class="rejilla">' + botones + '</div>';
 
-  if (n.seleccion.length === 4) {
-    h += '<h2>Parejas</h2>';
-    h += generarRepartos(n.seleccion).map(function (r, i) {
+  if (n.seleccion.length === 4 && n.propuesta) {
+    h += '<h2>Parejas, de más a menos recomendable</h2>';
+    h += n.propuesta.map(function (o, i) {
       return '<button type="button" class="reparto' + (n.reparto === i ? ' sel' : '') + '" data-accion="reparto" data-i="' + i + '" aria-pressed="' + (n.reparto === i) + '">' +
-        '<strong>' + esc(nombre(r.a[0])) + ' y ' + esc(nombre(r.a[1])) + '</strong>' +
+        '<span class="rp-cab">' + (i === 0 ? '<span class="chip chip-programada">Recomendado</span>' : '') +
+        '<span class="rp-coste">coste ' + o.coste + '</span></span>' +
+        lineaPareja(o, o.reparto.a) +
         '<span class="vs">contra</span>' +
-        '<strong>' + esc(nombre(r.b[0])) + ' y ' + esc(nombre(r.b[1])) + '</strong></button>';
+        lineaPareja(o, o.reparto.b) +
+        detalleRivales(o) + '</button>';
     }).join('');
   }
 
   h += '<button type="button" class="btn pri" data-accion="guardarNueva"' +
     (n.reparto === null || app.ocupado ? ' disabled' : '') + '>Guardar partida</button>';
   return h;
+}
+
+function veces(n, sufijo) {
+  if (n === 0) return 'nunca ' + sufijo;
+  return n + (n === 1 ? ' vez ' : ' veces ') + sufijo;
+}
+
+function lineaPareja(opcion, par) {
+  const k = clavePareja(par[0], par[1]);
+  const e = opcion.companeros.find(function (c) { return clavePareja(c.x, c.y) === k; });
+  const texto = e ? veces(e.veces, 'juntos') : 'con invitado';
+  return '<span class="rp-pareja"><strong>' + esc(nombre(par[0])) + ' y ' + esc(nombre(par[1])) + '</strong>' +
+    '<small>' + texto + '</small></span>';
+}
+
+function detalleRivales(opcion) {
+  if (!opcion.rivales.length) return '';
+  const partes = opcion.rivales.map(function (r) {
+    return esc(nombre(r.x)) + '–' + esc(nombre(r.y)) + ' ' + r.veces;
+  });
+  return '<span class="rp-det">Veces como rivales: ' + partes.join(' · ') + '</span>';
 }
 
 // ─── Vista: Resultado (y edición de una partida) ──────────────────────────────
@@ -838,12 +1038,28 @@ const ACCIONES = {
 
   editar: function (d) { abrirEdicion(d.id); },
 
+  ficha: function (d) {
+    app.fichaId = d.id;
+    if (app.vista !== 'jugador') app.volverFicha = app.vista;
+    ir('jugador');
+  },
+
+  volverFicha: function () { ir(app.volverFicha || 'inicio'); },
+
   elegir: function (d) {
     const n = app.nueva;
     const i = n.seleccion.indexOf(d.id);
     if (i === -1) { if (n.seleccion.length < 4) n.seleccion.push(d.id); }
     else n.seleccion.splice(i, 1);
-    n.reparto = null;
+    // La propuesta se calcula una vez al completar los 4, para que el desempate al azar no cambie al repintar.
+    if (n.seleccion.length === 4) {
+      const conteo = contarEmparejamientos(app.datos.partidas, app.datos.jugadoresPorId);
+      n.propuesta = proponerRepartos(n.seleccion, conteo, app.datos.jugadoresPorId, { companero: PESO_COMPANERO, rival: PESO_RIVAL });
+      n.reparto = 0; // el recomendado queda marcado
+    } else {
+      n.propuesta = null;
+      n.reparto = null;
+    }
     pintar();
   },
 
@@ -851,7 +1067,8 @@ const ACCIONES = {
 
   guardarNueva: async function () {
     const n = app.nueva;
-    const r = generarRepartos(n.seleccion)[n.reparto];
+    if (!n.propuesta || n.reparto === null) return;
+    const r = n.propuesta[n.reparto].reparto;
     const datos = { fecha: n.fecha, estado: 'programada', a1: r.a[0], a2: r.a[1], b1: r.b[0], b2: r.b[1] };
     const errores = validarPartida(normalizarPartida(datos), app.datos.jugadoresPorId);
     if (errores.length) { toast(errores.join(' · '), true); return; }
@@ -929,6 +1146,7 @@ const ACCIONES = {
 const CAMBIOS = {
   temporada: function (v) { app.filtro.temporada = v; pintar(); },
   jugador: function (v) { app.filtro.jugador = v; pintar(); },
+  periodo: function (v) { app.periodo = v; pintar(); },
   fechaNueva: function (v) { app.nueva.fecha = v; },
   fechaEdicion: function (v) { app.edicion.fecha = v; }
 };
