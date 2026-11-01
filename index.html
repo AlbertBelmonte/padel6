@@ -5,7 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#f4f5f2" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#151816" media="(prefers-color-scheme: dark)">
-<title>Pádel</title>
+<title>Pádel 6</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icono.svg" type="image/svg+xml">
+<link rel="icon" href="icono-192.png" type="image/png" sizes="192x192">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Pádel 6">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <style>
   :root {
     --fondo: #f4f5f2;
@@ -305,6 +313,9 @@
   <button type="button" data-ir="historial">
     <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>Historial
   </button>
+  <button type="button" data-ir="parejas">
+    <svg viewBox="0 0 24 24"><circle cx="8.5" cy="12" r="5.5"/><circle cx="15.5" cy="12" r="5.5"/></svg>Parejas
+  </button>
   <button type="button" data-ir="nueva" class="solo-editor">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>Nueva
   </button>
@@ -530,7 +541,7 @@ function pintar() {
   }
   const vistas = {
     inicio: vistaInicio, historial: vistaHistorial, nueva: vistaNueva, resultado: vistaResultado,
-    jugadores: vistaJugadores, jugador: vistaJugador
+    jugadores: vistaJugadores, jugador: vistaJugador, parejas: vistaParejas
   };
   v.innerHTML = vistas[app.vista]();
 }
@@ -656,6 +667,29 @@ function periodoDe(valor) {
 
 function pct(x) { return x === null ? '–' : Math.round(x * 100) + ' %'; }
 
+/** Selector de periodo compartido por la ficha y Parejas. Por defecto, la temporada actual. */
+function selectorPeriodo() {
+  const d = app.datos;
+  const actual = temporadaDe(hoy());
+  if (!app.periodo) app.periodo = 'temporada:' + actual;
+  const temporadas = Array.from(new Set(
+    d.partidas.filter(function (p) { return esFechaValida(p.fecha); }).map(function (p) { return temporadaDe(p.fecha); }).concat([actual])
+  )).sort().reverse();
+  const opciones = temporadas.map(function (t) { return ['temporada:' + t, 'Temporada ' + t]; })
+    .concat([['meses:' + MESES_RECIENTES, 'Últimos ' + MESES_RECIENTES + ' meses'], ['todo', 'Todo el histórico']]);
+  return '<select data-cambio="periodo" aria-label="Periodo" style="margin-top:12px">' +
+    opciones.map(function (o) {
+      return '<option value="' + esc(o[0]) + '"' + (o[0] === app.periodo ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
+    }).join('') + '</select>';
+}
+
+function signo(x, decimales) {
+  if (x === null) return '–';
+  const t = Math.abs(x).toFixed(decimales).replace('.', ',');
+  if (Number(Math.abs(x).toFixed(decimales)) === 0) return '0';
+  return (x > 0 ? '+' : '−') + t;
+}
+
 function deTotal(a, b) { return a + ' de ' + b; }
 
 function vistaJugador() {
@@ -663,19 +697,7 @@ function vistaJugador() {
   const j = d.jugadoresPorId[app.fichaId];
   if (!j) { app.vista = 'inicio'; return vistaInicio(); }
 
-  const actual = temporadaDe(hoy());
-  if (!app.periodo) app.periodo = 'temporada:' + actual;
-
-  // Selector de periodo: temporadas con partidas (y la actual), últimos meses y todo
-  const temporadas = Array.from(new Set(
-    d.partidas.filter(function (p) { return esFechaValida(p.fecha); }).map(function (p) { return temporadaDe(p.fecha); }).concat([actual])
-  )).sort().reverse();
-  const opciones = temporadas.map(function (t) { return ['temporada:' + t, 'Temporada ' + t]; })
-    .concat([['meses:' + MESES_RECIENTES, 'Últimos ' + MESES_RECIENTES + ' meses'], ['todo', 'Todo el histórico']]);
-  const selector = '<select data-cambio="periodo" aria-label="Periodo" style="margin-top:12px">' +
-    opciones.map(function (o) {
-      return '<option value="' + esc(o[0]) + '"' + (o[0] === app.periodo ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
-    }).join('') + '</select>';
+  const selector = selectorPeriodo();
 
   // Cabecera con el ELO actual (siempre del histórico completo)
   const rk = rankingElo(app.elo, d.jugadores, MINIMO_RANKING);
@@ -764,6 +786,51 @@ function tablaCruces(lista) {
     return '<div class="cruce' + (e.partidas < MINIMO_CRUCE ? ' pocas' : '') + '"><span class="n">' + esc(nombre(e.id)) + '</span>' +
       '<span class="c">' + deTotal(e.victorias, e.partidas) + '</span><span class="p">' + pct(e.pct) + '</span></div>';
   }).join('') + '</div>';
+}
+
+// ─── Vista: Parejas ───────────────────────────────────────────────────────────
+
+function nombrePareja(e) { return nombre(e.x) + ' y ' + nombre(e.y); }
+
+function vistaParejas() {
+  const d = app.datos;
+  let h = selectorPeriodo();
+  const lista = statsParejas(filtrarPeriodo(d.partidas, periodoDe(app.periodo), hoy()), d.jugadoresPorId, app.elo, { minimo: MINIMO_PAREJA });
+  const jugadas = lista.filter(function (e) { return e.partidas > 0; });
+  const nunca = lista.filter(function (e) { return e.partidas === 0; });
+  const dentro = lista.filter(function (e) { return e.posicion !== null; });
+
+  if (!jugadas.length) return h + vacio('Ninguna pareja de fijos ha jugado en este periodo.');
+
+  const mejor = dentro[0] || null;
+  const peor = dentro.length >= 2 ? dentro[dentro.length - 1] : null;
+  const caja = function (titulo, e) {
+    return '<div class="destacado"><div class="etq-tile">' + titulo + '</div>' +
+      (e ? '<strong>' + esc(nombrePareja(e)) + '</strong><span>' + deTotal(e.victorias, e.finalizadas) + ' · ' + pct(e.pct) + '</span>'
+         : '<strong>–</strong><span>ninguna llega a ' + MINIMO_PAREJA + ' partidas</span>') + '</div>';
+  };
+  h += '<h2>Mejor y peor pareja</h2><div class="destacados">' + caja('Mejor pareja', mejor) + caja('Peor pareja', peor) + '</div>';
+
+  h += '<h2>Todas las parejas</h2><div class="tarjeta ranking"><ol>' + jugadas.map(function (e) {
+    const fuera = e.posicion === null;
+    const partes = [e.finalizadas + (e.finalizadas === 1 ? ' partida' : ' partidas')];
+    if (e.partidas > e.finalizadas) partes.push((e.partidas - e.finalizadas) + ' cortada' + (e.partidas - e.finalizadas === 1 ? '' : 's'));
+    partes.push(pct(e.pctJuegos) + ' de juegos');
+    if (e.sinergia !== null) partes.push('sinergia ' + signo(e.sinergia, 1));
+    if (fuera) partes.push('faltan ' + e.faltan + ' para clasificar');
+    return '<li class="fila-rk' + (fuera ? ' fuera' : '') + '">' +
+      '<span class="pos">' + (fuera ? '–' : e.posicion) + '</span>' +
+      '<span class="rk-nombre">' + esc(nombrePareja(e)) + '<small>' + esc(partes.join(' · ')) + '</small></span>' +
+      '<span class="rk-elo">' + pct(e.pct) + '</span></li>';
+  }).join('') + '</ol></div>';
+
+  if (nunca.length) {
+    h += '<p class="nota-rk"><strong>Sin jugar juntas en este periodo:</strong> ' +
+      nunca.map(function (e) { return esc(nombrePareja(e)); }).join(' · ') + '.</p>';
+  }
+  h += '<p class="nota-rk">Ordenadas por % de victorias juntos; hacen falta ' + MINIMO_PAREJA +
+    ' partidas finalizadas para clasificar. La sinergia son las victorias de más (o de menos) respecto a lo que predecía el ELO de sus dos jugadores: +1,0 equivale a una victoria inesperada. Las parejas con invitado no cuentan.</p>';
+  return h;
 }
 
 // ─── Vista: Historial ─────────────────────────────────────────────────────────
@@ -1249,6 +1316,13 @@ document.addEventListener('visibilitychange', function () {
   pintar();
   refrescar();
 })();
+
+// Instalación como app: el service worker guarda la web para abrirla sin conexión.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js').catch(function () { /* sin service worker la app funciona igual */ });
+  });
+}
 </script>
 </body>
 </html>

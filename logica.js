@@ -616,6 +616,81 @@ function statsJugador(id, partidas, jugadoresPorId, opciones) {
   return s;
 }
 
+// ─── Estadísticas de parejas ──────────────────────────────────────────────────
+
+const MINIMO_PAREJA = 3; // partidas finalizadas juntos para tener posición en el ranking de parejas
+
+/**
+ * Estadísticas de todas las parejas de fijos activos sobre las partidas dadas (ya filtradas por periodo).
+ * Solo cuentan las parejas de dos fijos: con un invitado no hay pareja. Usa finalizadas y cortadas sin errores.
+ * La sinergia es victorias reales − victorias esperadas, con la E de cada partida sacada de `elo.historial`
+ * (el ELO de sus miembros justo antes de esa partida).
+ * Devuelve la lista ordenada: primero las que llegan al mínimo (por % de victorias, luego sinergia, luego partidas),
+ * con `posicion`; después el resto, con `posicion = null` y `faltan`.
+ * Cada elemento: { clave, x, y, partidas, finalizadas, victorias, derrotas, pct, juegosGanados, juegosPerdidos,
+ *   pctJuegos, esperadas, sinergia, posicion, faltan }.
+ */
+function statsParejas(partidas, jugadoresPorId, elo, opciones) {
+  const minimo = opciones && opciones.minimo !== undefined ? opciones.minimo : MINIMO_PAREJA;
+  const fijos = Object.keys(jugadoresPorId)
+    .filter(function (id) { return jugadoresPorId[id].tipo === 'fijo' && jugadoresPorId[id].activo === true; })
+    .sort();
+
+  const mapa = {};
+  for (let i = 0; i < fijos.length; i++) {
+    for (let j = i + 1; j < fijos.length; j++) {
+      mapa[clavePareja(fijos[i], fijos[j])] = {
+        clave: clavePareja(fijos[i], fijos[j]), x: fijos[i], y: fijos[j],
+        partidas: 0, finalizadas: 0, victorias: 0, derrotas: 0, pct: null,
+        juegosGanados: 0, juegosPerdidos: 0, pctJuegos: null,
+        esperadas: 0, sinergia: null, posicion: null, faltan: 0
+      };
+    }
+  }
+
+  const esperada = {};
+  ((elo && elo.historial) || []).forEach(function (h) { esperada[h.id_partida] = h.EA; });
+
+  partidas.forEach(function (p) {
+    if (p.estado !== 'finalizada' && p.estado !== 'cortada') return;
+    if (p.errores && p.errores.length) return;
+    const r = analizarSets(p);
+    ['a', 'b'].forEach(function (lado) {
+      const e = mapa[clavePareja(p[lado + '1'], p[lado + '2'])];
+      if (!e) return;
+      e.partidas++;
+      r.sets.forEach(function (s) {
+        e.juegosGanados += lado === 'a' ? s.a : s.b;
+        e.juegosPerdidos += lado === 'a' ? s.b : s.a;
+      });
+      if (p.estado !== 'finalizada') return;
+      e.finalizadas++;
+      if (r.ganador === lado.toUpperCase()) e.victorias++; else e.derrotas++;
+      if (esperada[p.id_partida] !== undefined) {
+        e.esperadas += lado === 'a' ? esperada[p.id_partida] : 1 - esperada[p.id_partida];
+      }
+    });
+  });
+
+  const lista = Object.keys(mapa).map(function (k) {
+    const e = mapa[k];
+    e.pct = porcentaje(e.victorias, e.finalizadas);
+    e.pctJuegos = porcentaje(e.juegosGanados, e.juegosGanados + e.juegosPerdidos);
+    e.sinergia = e.finalizadas ? e.victorias - e.esperadas : null;
+    e.faltan = Math.max(0, minimo - e.finalizadas);
+    return e;
+  });
+
+  const dentro = lista.filter(function (e) { return e.faltan === 0; }).sort(function (x, y) {
+    return y.pct - x.pct || y.sinergia - x.sinergia || y.finalizadas - x.finalizadas || (x.clave < y.clave ? -1 : 1);
+  });
+  const fuera = lista.filter(function (e) { return e.faltan > 0; }).sort(function (x, y) {
+    return y.finalizadas - x.finalizadas || (y.pct || 0) - (x.pct || 0) || (x.clave < y.clave ? -1 : 1);
+  });
+  dentro.forEach(function (e, i) { e.posicion = i + 1; });
+  return dentro.concat(fuera);
+}
+
 // ─── Orden y carga ────────────────────────────────────────────────────────────
 
 function secuenciaPartida(id) {

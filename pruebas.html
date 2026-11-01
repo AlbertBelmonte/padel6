@@ -638,6 +638,50 @@ prueba('sin partidas: todo a cero y porcentajes null', () => {
   igual([s.partidas, s.pctVictorias, s.pctJuegos, s.rachaActual, s.asistencia.pct], [0, null, null, null, null]);
 });
 
+grupo('statsParejas');
+
+function parejasHistorico() {
+  const partidas = partidasHistorico();
+  return statsParejas(partidas, POR_ID, calcularElo(partidas, POR_ID));
+}
+
+prueba('salen las 15 parejas de fijos activos y ninguna con invitado', () => {
+  const p = parejasHistorico();
+  igual(p.length, 15, 'parejas');
+  cierto(!p.some(e => e.clave.indexOf('J07') !== -1 || e.clave.indexOf('J08') !== -1), 'sin invitados');
+});
+prueba('histórico: las 4 parejas con 3 o más partidas, en orden', () => {
+  const p = parejasHistorico().filter(e => e.posicion !== null);
+  igual(p.map(e => e.clave), ['J02-J03', 'J01-J05', 'J01-J06', 'J01-J03'], 'orden');
+  igual(p.map(e => [e.victorias, e.finalizadas]), [[3, 3], [2, 3], [2, 4], [1, 4]], 'victorias');
+});
+prueba('las que no llegan al mínimo van detrás, sin posición y con lo que les falta', () => {
+  const fuera = parejasHistorico().filter(e => e.posicion === null);
+  igual(fuera.length, 11, 'fuera');
+  igual(fuera[0].faltan, 1, 'a las de 2 partidas les falta 1');
+  igual(fuera[fuera.length - 1].faltan, 2, 'a las de 1 partida les faltan 2');
+});
+prueba('sinergia: entre iguales, ganar suma +0,5 y perder −0,5', () => {
+  const partidas = [P('6-4 6-3', { errores: [] })];
+  const p = statsParejas(partidas, POR_ID, calcularElo(partidas, POR_ID));
+  const de = k => p.find(e => e.clave === k);
+  igual(de('J01-J02').sinergia, 0.5, 'ganadores');
+  igual(de('J03-J04').sinergia, -0.5, 'perdedores');
+  igual(de('J01-J03').finalizadas, 0, 'una pareja que no jugó');
+  igual(de('J01-J03').sinergia, null, 'sin sinergia');
+});
+prueba('una cortada suma partidas y juegos, pero no victorias', () => {
+  const partidas = [P('6-4 3-2', { estado: 'cortada', errores: [] })];
+  const e = statsParejas(partidas, POR_ID, calcularElo(partidas, POR_ID)).find(x => x.clave === 'J01-J02');
+  igual([e.partidas, e.finalizadas, e.victorias, e.juegosGanados, e.juegosPerdidos], [1, 0, 0, 9, 6]);
+});
+prueba('la pareja de dos fijos que juega contra un invitado sí cuenta', () => {
+  const partidas = [P('6-4 6-3', { b2: 'J07', errores: [] })];
+  const p = statsParejas(partidas, POR_ID, calcularElo(partidas, POR_ID));
+  igual(p.find(e => e.clave === 'J01-J02').victorias, 1, 'J01-J02');
+  igual(p.reduce((t, e) => t + e.partidas, 0), 1, 'solo una pareja suma');
+});
+
 grupo('parsearDatos');
 
 prueba('rechaza una respuesta con ok = false', () => {
