@@ -258,6 +258,103 @@ function generarRepartos(ids) {
   ];
 }
 
+// ─── ELO ──────────────────────────────────────────────────────────────────────
+
+const ELO_INICIAL = 1000;
+const ELO_K = 32;
+
+/**
+ * Calcula el ELO individual desde cero, en orden cronológico.
+ * Solo entran las partidas finalizadas y sin errores. Las cortadas no cuentan.
+ * Los fijos empiezan en `inicial`. Un invitado juega con un rating igual a la media
+ * de los fijos justo antes de la partida, y su rating no se guarda ni se actualiza.
+ *
+ * Devuelve {
+ *   ratings:  { id: rating }               solo fijos
+ *   partidas: { id: n.º de partidas que han contado para su ELO }
+ *   ultimo:   { id: Δ de su última partida }  (sin entrada si no ha jugado)
+ *   historial: [{ id_partida, fecha, EA, SA, cambios: { id: { antes, despues, delta } } }]
+ * }
+ * EA es la probabilidad esperada de que gane la pareja A; la usará la sinergia de parejas.
+ */
+function calcularElo(partidas, jugadoresPorId, opciones) {
+  const inicial = opciones && opciones.inicial !== undefined ? opciones.inicial : ELO_INICIAL;
+  const K = opciones && opciones.K !== undefined ? opciones.K : ELO_K;
+
+  const ratings = {};
+  const jugadas = {};
+  const ultimo = {};
+  Object.keys(jugadoresPorId).forEach(function (id) {
+    if (jugadoresPorId[id].tipo === 'fijo') { ratings[id] = inicial; jugadas[id] = 0; }
+  });
+
+  const validas = partidas
+    .filter(function (p) { return p.estado === 'finalizada' && (!p.errores || p.errores.length === 0); })
+    .slice()
+    .sort(compararPartidas);
+
+  const historial = [];
+  validas.forEach(function (p) {
+    const r = analizarSets(p);
+    if (r.errores.length || !r.ganador) return;
+
+    const fijos = Object.keys(ratings);
+    const media = fijos.length
+      ? fijos.reduce(function (s, id) { return s + ratings[id]; }, 0) / fijos.length
+      : inicial;
+    const rating = function (id) { return ratings[id] !== undefined ? ratings[id] : media; };
+
+    const RA = (rating(p.a1) + rating(p.a2)) / 2;
+    const RB = (rating(p.b1) + rating(p.b2)) / 2;
+    const EA = 1 / (1 + Math.pow(10, (RB - RA) / 400));
+    const SA = r.ganador === 'A' ? 1 : 0;
+    const delta = K * (SA - EA);
+
+    const cambios = {};
+    [[p.a1, delta], [p.a2, delta], [p.b1, -delta], [p.b2, -delta]].forEach(function (par) {
+      const id = par[0];
+      if (ratings[id] === undefined) return; // invitado
+      const antes = ratings[id];
+      ratings[id] = antes + par[1];
+      jugadas[id]++;
+      ultimo[id] = par[1];
+      cambios[id] = { antes: antes, despues: ratings[id], delta: par[1] };
+    });
+    historial.push({ id_partida: p.id_partida, fecha: p.fecha, EA: EA, SA: SA, cambios: cambios });
+  });
+
+  return { ratings: ratings, partidas: jugadas, ultimo: ultimo, historial: historial };
+}
+
+/**
+ * Ranking ELO de los fijos activos.
+ * Los que tienen al menos `minimo` partidas van primero, ordenados por ELO y con posición.
+ * Los demás van al final, también por ELO, con posicion = null y `faltan` partidas.
+ * Devuelve [{ id, nombre, elo, partidas, ultimo, posicion, faltan }], con elo y ultimo sin redondear.
+ */
+function rankingElo(elo, jugadores, minimo) {
+  const min = minimo === undefined ? 5 : minimo;
+  const filas = jugadores
+    .filter(function (j) { return j.tipo === 'fijo' && j.activo === true && elo.ratings[j.id_jugador] !== undefined; })
+    .map(function (j) {
+      const n = elo.partidas[j.id_jugador] || 0;
+      return {
+        id: j.id_jugador,
+        nombre: j.nombre,
+        elo: elo.ratings[j.id_jugador],
+        partidas: n,
+        ultimo: elo.ultimo[j.id_jugador] === undefined ? null : elo.ultimo[j.id_jugador],
+        posicion: null,
+        faltan: Math.max(0, min - n)
+      };
+    });
+  const porElo = function (x, y) { return y.elo - x.elo || (x.nombre < y.nombre ? -1 : 1); };
+  const dentro = filas.filter(function (f) { return f.faltan === 0; }).sort(porElo);
+  const fuera = filas.filter(function (f) { return f.faltan > 0; }).sort(porElo);
+  dentro.forEach(function (f, i) { f.posicion = i + 1; });
+  return dentro.concat(fuera);
+}
+
 // ─── Orden y carga ────────────────────────────────────────────────────────────
 
 function secuenciaPartida(id) {

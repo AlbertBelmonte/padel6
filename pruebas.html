@@ -384,6 +384,95 @@ prueba('rechaza menos de 4 jugadores o repetidos', () => {
   });
 });
 
+grupo('calcularElo');
+
+function eloHistorico() {
+  return calcularElo(parsearDatos(respuesta(copia(HISTORICO_CRUDO))).partidas, POR_ID);
+}
+function redondeados(ratings) {
+  const r = {};
+  Object.keys(ratings).forEach(id => { r[id] = Math.round(ratings[id]); });
+  return r;
+}
+
+prueba('sin partidas, todos los fijos en 1000 y sin invitados', () => {
+  const e = calcularElo([], POR_ID);
+  igual(e.ratings, { J01: 1000, J02: 1000, J03: 1000, J04: 1000, J05: 1000, J06: 1000 });
+  igual(e.historial, [], 'historial');
+});
+prueba('primera partida entre iguales: ±16', () => {
+  const e = calcularElo([P('6-4 6-3', { errores: [] })], POR_ID);
+  igual(e.ratings.J01, 1016, 'J01'); igual(e.ratings.J02, 1016, 'J02');
+  igual(e.ratings.J03, 984, 'J03'); igual(e.ratings.J04, 984, 'J04');
+  igual(e.historial[0].EA, 0.5, 'EA'); igual(e.historial[0].SA, 1, 'SA');
+  igual(e.ultimo.J03, -16, 'ultimo J03');
+});
+prueba('si gana B, A pierde puntos', () => {
+  const e = calcularElo([P('3-6 4-6', { errores: [] })], POR_ID);
+  igual(e.ratings.J01, 984, 'J01'); igual(e.ratings.J03, 1016, 'J03');
+});
+prueba('el set sin decidir no cambia nada', () => {
+  const a = calcularElo([P('6-4 6-3', { errores: [] })], POR_ID).ratings;
+  const b = calcularElo([P('6-4 6-3 2-6', { errores: [] })], POR_ID).ratings;
+  igual(b, a);
+});
+prueba('cortadas, programadas, canceladas y partidas con errores no cuentan', () => {
+  const e = calcularElo([
+    P('6-4 4-6', { estado: 'cortada', errores: [] }),
+    P('', { estado: 'programada', errores: [] }),
+    P('', { estado: 'cancelada', errores: [] }),
+    P('6-4 6-3', { errores: ['algo'] })
+  ], POR_ID);
+  igual(e.historial.length, 0, 'historial');
+  igual(e.ratings.J01, 1000, 'J01');
+});
+prueba('el invitado juega a la media y no tiene rating', () => {
+  const e = calcularElo([P('6-4 6-3', { a2: 'J07', errores: [] })], POR_ID);
+  igual(e.ratings.J07, undefined, 'J07');
+  igual(e.ratings.J01, 1016, 'J01');
+  igual(e.partidas.J01, 1, 'partidas J01');
+  igual(Object.keys(e.historial[0].cambios).sort(), ['J01', 'J03', 'J04'], 'cambios');
+});
+prueba('sin invitados, la suma de puntos se conserva', () => {
+  const partidas = parsearDatos(respuesta(copia(HISTORICO_CRUDO))).partidas.filter(p => !p.incluye_invitado);
+  const e = calcularElo(partidas, POR_ID);
+  const suma = Object.values(e.ratings).reduce((s, r) => s + r, 0);
+  cierto(Math.abs(suma - 6000) < 1e-9, 'suma ' + suma);
+});
+prueba('no depende del orden de entrada', () => {
+  const partidas = parsearDatos(respuesta(copia(HISTORICO_CRUDO))).partidas;
+  igual(calcularElo(partidas.slice().reverse(), POR_ID).ratings, calcularElo(partidas, POR_ID).ratings);
+});
+prueba('histórico: valores redondeados con K = 32', () => {
+  igual(redondeados(eloHistorico().ratings), { J01: 1010, J02: 1131, J03: 981, J04: 968, J05: 965, J06: 930 });
+});
+prueba('histórico: partidas que cuentan para cada uno', () => {
+  igual(eloHistorico().partidas, { J01: 16, J02: 9, J03: 13, J04: 8, J05: 8, J06: 11 });
+});
+prueba('acepta K e inicial como opciones', () => {
+  const e = calcularElo([P('6-4 6-3', { errores: [] })], POR_ID, { inicial: 1500, K: 20 });
+  igual(e.ratings.J01, 1510, 'J01');
+});
+
+grupo('rankingElo');
+
+prueba('histórico: orden y posiciones', () => {
+  const r = rankingElo(eloHistorico(), JUGADORES, 5);
+  igual(r.map(f => f.nombre), ['Evaristo', 'Albert', 'Jordi', 'Juan', 'Rafa', 'Santi'], 'orden');
+  igual(r.map(f => f.posicion), [1, 2, 3, 4, 5, 6], 'posiciones');
+});
+prueba('quien no llega al mínimo va al final, sin posición y con lo que le falta', () => {
+  const r = rankingElo(eloHistorico(), JUGADORES, 10);
+  igual(r.map(f => f.nombre), ['Albert', 'Jordi', 'Santi', 'Evaristo', 'Juan', 'Rafa'], 'orden');
+  igual(r.map(f => f.posicion), [1, 2, 3, null, null, null], 'posiciones');
+  igual(r.map(f => f.faltan), [0, 0, 0, 1, 2, 2], 'faltan');
+});
+prueba('sin invitados ni fijos inactivos', () => {
+  const jugadores = JUGADORES.map(j => j.id_jugador === 'J06' ? Object.assign({}, j, { activo: false }) : j);
+  const r = rankingElo(eloHistorico(), jugadores, 5);
+  igual(r.map(f => f.id).sort(), ['J01', 'J02', 'J03', 'J04', 'J05'], 'ids');
+});
+
 grupo('parsearDatos');
 
 prueba('rechaza una respuesta con ok = false', () => {

@@ -123,6 +123,23 @@
   .alerta-caja summary { font-weight: 600; cursor: pointer; }
   .alerta-caja ul { margin: 8px 0 0; padding-left: 18px; }
 
+  /* Ranking */
+  .ranking { padding: 4px 0; }
+  .ranking ol { list-style: none; margin: 0; padding: 0; }
+  .fila-rk { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--borde); }
+  .fila-rk:first-child { border-top: 0; }
+  .fila-rk .pos { width: 22px; font-weight: 700; color: var(--suave); font-variant-numeric: tabular-nums; }
+  .fila-rk:first-child:not(.fuera) .pos { color: var(--acento); }
+  .fila-rk .rk-nombre { flex: 1; min-width: 0; font-weight: 600; }
+  .fila-rk .rk-nombre small { display: block; font-weight: 400; font-size: 12px; color: var(--suave); }
+  .fila-rk .rk-delta { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--suave); min-width: 36px; text-align: right; }
+  .fila-rk .rk-delta.sube { color: var(--acento); }
+  .fila-rk .rk-delta.baja { color: var(--peligro); }
+  .fila-rk .rk-elo { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 52px; text-align: right; }
+  .fila-rk.fuera { opacity: .5; }
+  .fila-rk.fuera .rk-elo { font-size: 17px; font-weight: 600; }
+  .nota-rk { font-size: 12px; color: var(--suave); margin: 6px 2px 0; }
+
   /* Formularios */
   label.campo { display: block; font-size: 13px; color: var(--suave); margin-bottom: 4px; }
   input[type="date"], input[type="text"], input[type="password"], select {
@@ -271,6 +288,7 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbwRtCixP2FUUnqqk7diRqpuL8gOVpttruZmStHmS-oj8a7PfZXXaVLIhrgj5GNyTsks/exec';
 const CLAVE_DATOS = 'padel6.datos';
 const CLAVE_PIN = 'padel6.pin';
+const MINIMO_RANKING = 5; // partidas finalizadas para tener posición en los rankings individuales
 const REFRESCO_MIN_MS = 60 * 1000; // al volver a la app, refresca si han pasado más de 60 s
 
 // ─── Estado de la app ─────────────────────────────────────────────────────────
@@ -278,6 +296,7 @@ const REFRESCO_MIN_MS = 60 * 1000; // al volver a la app, refresca si han pasado
 const app = {
   crudo: null,          // última respuesta de doGet (lo que se guarda en caché)
   datos: null,          // resultado de parsearDatos(crudo)
+  elo: null,            // resultado de calcularElo con todas las partidas
   errorCarga: null,
   actualizando: false,
   sinConexion: false,
@@ -356,6 +375,7 @@ function toast(mensaje, esError) {
 function aplicarCrudo(crudo) {
   try {
     app.datos = parsearDatos(crudo);
+    app.elo = calcularElo(app.datos.partidas, app.datos.jugadoresPorId, { inicial: ELO_INICIAL, K: ELO_K });
     app.crudo = crudo;
     app.errorCarga = null;
   } catch (e) {
@@ -533,6 +553,7 @@ function vistaInicio() {
     .slice(-5).reverse();
 
   let h = avisoErrores();
+  h += '<h2>Ranking ELO</h2>' + tablaRanking();
   h += '<h2>Programadas</h2>';
   h += programadas.length
     ? programadas.map(tarjetaPartida).join('')
@@ -540,6 +561,33 @@ function vistaInicio() {
   h += '<h2>Últimos resultados</h2>';
   h += ultimas.length ? ultimas.map(tarjetaPartida).join('') : vacio('Todavía no hay resultados.');
   return h;
+}
+
+function tablaRanking() {
+  const filas = rankingElo(app.elo, app.datos.jugadores, MINIMO_RANKING);
+  if (!filas.length) return vacio('Todavía no hay jugadores fijos.');
+
+  const items = filas.map(function (f) {
+    const fuera = f.posicion === null;
+    let delta = '';
+    if (f.ultimo !== null) {
+      const d = Math.round(f.ultimo);
+      delta = '<span class="rk-delta ' + (d > 0 ? 'sube' : (d < 0 ? 'baja' : '')) + '" title="Cambio en su última partida">' +
+        (d > 0 ? '+' + d : (d < 0 ? '−' + Math.abs(d) : '±0')) + '</span>';
+    }
+    const detalle = f.partidas + (f.partidas === 1 ? ' partida' : ' partidas') +
+      (fuera ? ' · faltan ' + f.faltan + ' para clasificar' : '');
+    return '<li class="fila-rk' + (fuera ? ' fuera' : '') + '">' +
+      '<span class="pos">' + (fuera ? '–' : f.posicion) + '</span>' +
+      '<span class="rk-nombre">' + esc(f.nombre) + '<small>' + detalle + '</small></span>' +
+      delta +
+      '<span class="rk-elo">' + Math.round(f.elo) + '</span></li>';
+  }).join('');
+
+  const contadas = app.elo.historial.length;
+  return '<div class="tarjeta ranking"><ol>' + items + '</ol></div>' +
+    '<p class="nota-rk">' + contadas + (contadas === 1 ? ' partida finalizada' : ' partidas finalizadas') +
+    ' desde el 31 ago 2026. Mínimo ' + MINIMO_RANKING + ' para clasificar. Diferencias de menos de 15 puntos no son significativas.</p>';
 }
 
 // ─── Vista: Historial ─────────────────────────────────────────────────────────
