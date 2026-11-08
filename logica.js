@@ -15,7 +15,10 @@
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
-const ESTADOS = ['programada', 'finalizada', 'cortada', 'cancelada'];
+const ESTADOS = ['programada', 'finalizada', 'empatada', 'cortada', 'cancelada'];
+// Estados que se deducen del marcador y estados que tienen resultado (victoria, derrota o empate)
+const ESTADOS_MARCADOR = ['finalizada', 'empatada', 'cortada'];
+const ESTADOS_CON_RESULTADO = ['finalizada', 'empatada'];
 const TIPOS = ['fijo', 'invitado'];
 const COLS_SET = ['s1_a', 's1_b', 's2_a', 's2_b', 's3_a', 's3_b'];
 
@@ -97,7 +100,9 @@ function esSetCompleto(a, b) {
  *   sets:        [{ num, a, b, completo, sinDecidir }] solo los jugados, en orden
  *   ganador:     'A', 'B' o null (la primera pareja que gana 2 sets completos)
  *   setDecisivo: 2, 3 o null
- *   estado:      'finalizada', 'cortada' o null si no se ha jugado ningún set
+ *   estado:      'finalizada' si alguien llegó a 2 sets;
+ *                'empatada' si los dos primeros sets están completos y van 1-1 y el tercero no se termina
+ *                (no empezado o incompleto); 'cortada' si se jugó algo sin llegar a eso; null sin sets
  */
 function analizarSets(p) {
   const errores = [];
@@ -148,16 +153,19 @@ function analizarSets(p) {
     else if (ganadosB === 2) { ganador = 'B'; setDecisivo = s.num; }
   });
 
+  const empate = !ganador && ganadosA === 1 && ganadosB === 1 &&
+    sets.length >= 2 && sets[0].num === 1 && sets[0].completo && sets[1].num === 2 && sets[1].completo;
+
   return {
     errores: errores,
     sets: sets,
     ganador: ganador,
     setDecisivo: setDecisivo,
-    estado: sets.length === 0 ? null : (ganador ? 'finalizada' : 'cortada')
+    estado: sets.length === 0 ? null : (ganador ? 'finalizada' : (empate ? 'empatada' : 'cortada'))
   };
 }
 
-/** 'finalizada', 'cortada' o null (sin sets o con errores en el marcador). */
+/** 'finalizada', 'empatada', 'cortada' o null (sin sets o con errores en el marcador). */
 function calcularEstado(p) {
   const r = analizarSets(p);
   return r.errores.length ? null : r.estado;
@@ -200,7 +208,7 @@ function validarPartida(p, jugadoresPorId) {
 
   if (p.estado === 'programada' || p.estado === 'cancelada') {
     if (hayJuegos(p)) errores.push('Una partida ' + p.estado + ' no puede tener juegos');
-  } else if (p.estado === 'finalizada' || p.estado === 'cortada') {
+  } else if (ESTADOS_MARCADOR.indexOf(p.estado) !== -1) {
     if (!hayJuegos(p)) {
       errores.push('Una partida ' + p.estado + ' necesita al menos un set');
     } else {
@@ -270,7 +278,7 @@ function clavePareja(x, y) {
 
 /**
  * Cuenta cuántas veces ha jugado cada par de fijos como compañeros y como rivales.
- * Cuentan las partidas programadas, finalizadas y cortadas sin errores (lo que se equilibra
+ * Cuentan las partidas programadas, finalizadas, empatadas y cortadas sin errores (lo que se equilibra
  * es haber jugado, no el resultado). Las canceladas no cuentan. Los pares con un invitado no se cuentan.
  * Devuelve { juntos: { clave: n }, rivales: { clave: n }, ultimaJuntos: { clave: 'aaaa-mm-dd' } }.
  */
@@ -287,7 +295,7 @@ function contarEmparejamientos(partidas, jugadoresPorId) {
   };
 
   partidas.forEach(function (p) {
-    if (['programada', 'finalizada', 'cortada'].indexOf(p.estado) === -1) return;
+    if (['programada'].concat(ESTADOS_MARCADOR).indexOf(p.estado) === -1) return;
     if (p.errores && p.errores.length) return;
     [[p.a1, p.a2], [p.b1, p.b2]].forEach(function (par) {
       const k = sumar(juntos, par[0], par[1]);
@@ -367,7 +375,7 @@ const ELO_K = 32;
 
 /**
  * Calcula el ELO individual desde cero, en orden cronológico.
- * Solo entran las partidas finalizadas y sin errores. Las cortadas no cuentan.
+ * Entran las partidas finalizadas (S = 1 o 0) y empatadas (S = 0,5) sin errores. Las cortadas no cuentan.
  * Los fijos empiezan en `inicial`. Un invitado juega con un rating igual a la media
  * de los fijos justo antes de la partida, y su rating no se guarda ni se actualiza.
  *
@@ -391,14 +399,14 @@ function calcularElo(partidas, jugadoresPorId, opciones) {
   });
 
   const validas = partidas
-    .filter(function (p) { return p.estado === 'finalizada' && (!p.errores || p.errores.length === 0); })
+    .filter(function (p) { return ESTADOS_CON_RESULTADO.indexOf(p.estado) !== -1 && (!p.errores || p.errores.length === 0); })
     .slice()
     .sort(compararPartidas);
 
   const historial = [];
   validas.forEach(function (p) {
     const r = analizarSets(p);
-    if (r.errores.length || !r.ganador) return;
+    if (r.errores.length || (!r.ganador && r.estado !== 'empatada')) return;
 
     const fijos = Object.keys(ratings);
     const media = fijos.length
@@ -409,7 +417,7 @@ function calcularElo(partidas, jugadoresPorId, opciones) {
     const RA = (rating(p.a1) + rating(p.a2)) / 2;
     const RB = (rating(p.b1) + rating(p.b2)) / 2;
     const EA = 1 / (1 + Math.pow(10, (RB - RA) / 400));
-    const SA = r.ganador === 'A' ? 1 : 0;
+    const SA = r.ganador === 'A' ? 1 : (r.ganador === 'B' ? 0 : 0.5);
     const delta = K * (SA - EA);
 
     const cambios = {};
@@ -487,7 +495,8 @@ function porcentaje(a, total) { return total > 0 ? a / total : null; }
 
 /**
  * Estadísticas de un jugador sobre las partidas dadas (ya filtradas por periodo).
- * Usa las partidas finalizadas y cortadas sin errores. Ver la tabla de métricas del documento de contexto.
+ * Usa las partidas finalizadas, empatadas y cortadas sin errores. Ver la tabla de métricas del documento de contexto.
+ * Un empate vale media victoria en todos los porcentajes: (V + ½E) / (V + E + D).
  * Los porcentajes van de 0 a 1, o null si no hay datos.
  */
 function statsJugador(id, partidas, jugadoresPorId, opciones) {
@@ -495,20 +504,20 @@ function statsJugador(id, partidas, jugadoresPorId, opciones) {
   const esFijo = function (x) { return !!jugadoresPorId[x] && jugadoresPorId[x].tipo === 'fijo'; };
 
   const jugadasGrupo = partidas
-    .filter(function (p) { return (p.estado === 'finalizada' || p.estado === 'cortada') && (!p.errores || !p.errores.length); })
+    .filter(function (p) { return ESTADOS_MARCADOR.indexOf(p.estado) !== -1 && (!p.errores || !p.errores.length); })
     .slice()
     .sort(compararPartidas);
   const suyas = jugadasGrupo.filter(function (p) { return [p.a1, p.a2, p.b1, p.b2].indexOf(id) !== -1; });
 
   const s = {
     id: id,
-    partidas: suyas.length, finalizadas: 0, cortadas: 0,
+    partidas: suyas.length, conResultado: 0, finalizadas: 0, empatadas: 0, cortadas: 0,
     asistencia: { partidas: suyas.length, totalGrupo: jugadasGrupo.length, pct: porcentaje(suyas.length, jugadasGrupo.length) },
-    victorias: 0, derrotas: 0, pctVictorias: null,
+    victorias: 0, empates: 0, derrotas: 0, pctVictorias: null,
     setsGanados: 0, setsPerdidos: 0,
     juegosGanados: 0, juegosPerdidos: 0, pctJuegos: null, difJuegosPorPartida: null,
     tiebreaksGanados: 0, tiebreaksPerdidos: 0,
-    a3Sets: { jugadas: 0, ganadas: 0, pct: null },
+    a3Sets: { jugadas: 0, ganadas: 0, empatadas: 0, pct: null },
     remontadas: 0,
     roscosDados: 0, roscosRecibidos: 0,
     rachaActual: null, rachaMaxVictorias: 0, rachaMaxDerrotas: 0,
@@ -548,40 +557,41 @@ function statsJugador(id, partidas, jugadoresPorId, opciones) {
       return; // las cortadas no cuentan para victorias, rachas, cruces ni partidas a 3 sets
     }
 
-    s.finalizadas++;
-    const gano = r.ganador === (enA ? 'A' : 'B');
-    if (gano) s.victorias++; else s.derrotas++;
-    s.forma.push(gano ? 'V' : 'D');
+    s.conResultado++;
+    const empate = p.estado === 'empatada';
+    const gano = !empate && r.ganador === (enA ? 'A' : 'B');
+    const tipo = empate ? 'E' : (gano ? 'V' : 'D');
+    if (empate) { s.empatadas++; s.empates++; }
+    else { s.finalizadas++; if (gano) s.victorias++; else s.derrotas++; }
+    s.forma.push(tipo);
 
-    if (r.setDecisivo === 3) {
+    // Partidas a 3 sets: las decididas en el tercero y los empates (llegaron 1-1)
+    if (r.setDecisivo === 3 || empate) {
       s.a3Sets.jugadas++;
       if (gano) s.a3Sets.ganadas++;
+      if (empate) s.a3Sets.empatadas++;
     }
     const primero = r.sets[0];
     if (gano && primero && primero.num === 1 && (enA ? primero.a < primero.b : primero.b < primero.a)) s.remontadas++;
 
-    const tipo = gano ? 'V' : 'D';
+    // Un empate corta las rachas de victorias y de derrotas
     racha = racha && racha.tipo === tipo ? { tipo: tipo, n: racha.n + 1 } : { tipo: tipo, n: 1 };
     if (tipo === 'V') s.rachaMaxVictorias = Math.max(s.rachaMaxVictorias, racha.n);
-    else s.rachaMaxDerrotas = Math.max(s.rachaMaxDerrotas, racha.n);
+    if (tipo === 'D') s.rachaMaxDerrotas = Math.max(s.rachaMaxDerrotas, racha.n);
 
-    if (esFijo(companero)) {
-      comp[companero] = comp[companero] || { id: companero, partidas: 0, victorias: 0 };
-      comp[companero].partidas++;
-      if (gano) comp[companero].victorias++;
-    }
-    contrarios.forEach(function (x) {
-      if (!esFijo(x)) return;
-      riv[x] = riv[x] || { id: x, partidas: 0, victorias: 0 };
-      riv[x].partidas++;
-      if (gano) riv[x].victorias++;
-    });
+    const anotar = function (mapa, x) {
+      mapa[x] = mapa[x] || { id: x, partidas: 0, victorias: 0, empates: 0, derrotas: 0 };
+      mapa[x].partidas++;
+      if (empate) mapa[x].empates++; else if (gano) mapa[x].victorias++; else mapa[x].derrotas++;
+    };
+    if (esFijo(companero)) anotar(comp, companero);
+    contrarios.forEach(function (x) { if (esFijo(x)) anotar(riv, x); });
   });
 
-  s.pctVictorias = porcentaje(s.victorias, s.victorias + s.derrotas);
+  s.pctVictorias = porcentaje(s.victorias + s.empates / 2, s.conResultado);
   s.pctJuegos = porcentaje(s.juegosGanados, s.juegosGanados + s.juegosPerdidos);
   s.difJuegosPorPartida = s.partidas ? (s.juegosGanados - s.juegosPerdidos) / s.partidas : null;
-  s.a3Sets.pct = porcentaje(s.a3Sets.ganadas, s.a3Sets.jugadas);
+  s.a3Sets.pct = porcentaje(s.a3Sets.ganadas + s.a3Sets.empatadas / 2, s.a3Sets.jugadas);
   s.rachaActual = racha;
   s.forma = s.forma.slice(-5);
 
@@ -589,7 +599,7 @@ function statsJugador(id, partidas, jugadoresPorId, opciones) {
   const cerrar = function (mapa) {
     return Object.keys(mapa).map(function (k) {
       const e = mapa[k];
-      e.pct = porcentaje(e.victorias, e.partidas);
+      e.pct = porcentaje(e.victorias + e.empates / 2, e.partidas);
       return e;
     }).sort(function (x, y) {
       return y.pct - x.pct || y.partidas - x.partidas || (nombre(x.id) < nombre(y.id) ? -1 : 1);
@@ -618,16 +628,17 @@ function statsJugador(id, partidas, jugadoresPorId, opciones) {
 
 // ─── Estadísticas de parejas ──────────────────────────────────────────────────
 
-const MINIMO_PAREJA = 3; // partidas finalizadas juntos para tener posición en el ranking de parejas
+const MINIMO_PAREJA = 3; // partidas con resultado (finalizadas o empatadas) juntos para tener posición
 
 /**
  * Estadísticas de todas las parejas de fijos activos sobre las partidas dadas (ya filtradas por periodo).
- * Solo cuentan las parejas de dos fijos: con un invitado no hay pareja. Usa finalizadas y cortadas sin errores.
+ * Solo cuentan las parejas de dos fijos: con un invitado no hay pareja. Usa finalizadas, empatadas y cortadas sin errores.
+ * Un empate vale media victoria en el % y en la sinergia.
  * La sinergia es victorias reales − victorias esperadas, con la E de cada partida sacada de `elo.historial`
  * (el ELO de sus miembros justo antes de esa partida).
  * Devuelve la lista ordenada: primero las que llegan al mínimo (por % de victorias, luego sinergia, luego partidas),
  * con `posicion`; después el resto, con `posicion = null` y `faltan`.
- * Cada elemento: { clave, x, y, partidas, finalizadas, victorias, derrotas, pct, juegosGanados, juegosPerdidos,
+ * Cada elemento: { clave, x, y, partidas, conResultado, victorias, empates, derrotas, pct, juegosGanados, juegosPerdidos,
  *   pctJuegos, esperadas, sinergia, posicion, faltan }.
  */
 function statsParejas(partidas, jugadoresPorId, elo, opciones) {
@@ -641,7 +652,7 @@ function statsParejas(partidas, jugadoresPorId, elo, opciones) {
     for (let j = i + 1; j < fijos.length; j++) {
       mapa[clavePareja(fijos[i], fijos[j])] = {
         clave: clavePareja(fijos[i], fijos[j]), x: fijos[i], y: fijos[j],
-        partidas: 0, finalizadas: 0, victorias: 0, derrotas: 0, pct: null,
+        partidas: 0, conResultado: 0, victorias: 0, empates: 0, derrotas: 0, pct: null,
         juegosGanados: 0, juegosPerdidos: 0, pctJuegos: null,
         esperadas: 0, sinergia: null, posicion: null, faltan: 0
       };
@@ -652,7 +663,7 @@ function statsParejas(partidas, jugadoresPorId, elo, opciones) {
   ((elo && elo.historial) || []).forEach(function (h) { esperada[h.id_partida] = h.EA; });
 
   partidas.forEach(function (p) {
-    if (p.estado !== 'finalizada' && p.estado !== 'cortada') return;
+    if (ESTADOS_MARCADOR.indexOf(p.estado) === -1) return;
     if (p.errores && p.errores.length) return;
     const r = analizarSets(p);
     ['a', 'b'].forEach(function (lado) {
@@ -663,9 +674,11 @@ function statsParejas(partidas, jugadoresPorId, elo, opciones) {
         e.juegosGanados += lado === 'a' ? s.a : s.b;
         e.juegosPerdidos += lado === 'a' ? s.b : s.a;
       });
-      if (p.estado !== 'finalizada') return;
-      e.finalizadas++;
-      if (r.ganador === lado.toUpperCase()) e.victorias++; else e.derrotas++;
+      if (ESTADOS_CON_RESULTADO.indexOf(p.estado) === -1) return;
+      e.conResultado++;
+      if (p.estado === 'empatada') e.empates++;
+      else if (r.ganador === lado.toUpperCase()) e.victorias++;
+      else e.derrotas++;
       if (esperada[p.id_partida] !== undefined) {
         e.esperadas += lado === 'a' ? esperada[p.id_partida] : 1 - esperada[p.id_partida];
       }
@@ -674,18 +687,18 @@ function statsParejas(partidas, jugadoresPorId, elo, opciones) {
 
   const lista = Object.keys(mapa).map(function (k) {
     const e = mapa[k];
-    e.pct = porcentaje(e.victorias, e.finalizadas);
+    e.pct = porcentaje(e.victorias + e.empates / 2, e.conResultado);
     e.pctJuegos = porcentaje(e.juegosGanados, e.juegosGanados + e.juegosPerdidos);
-    e.sinergia = e.finalizadas ? e.victorias - e.esperadas : null;
-    e.faltan = Math.max(0, minimo - e.finalizadas);
+    e.sinergia = e.conResultado ? e.victorias + e.empates / 2 - e.esperadas : null;
+    e.faltan = Math.max(0, minimo - e.conResultado);
     return e;
   });
 
   const dentro = lista.filter(function (e) { return e.faltan === 0; }).sort(function (x, y) {
-    return y.pct - x.pct || y.sinergia - x.sinergia || y.finalizadas - x.finalizadas || (x.clave < y.clave ? -1 : 1);
+    return y.pct - x.pct || y.sinergia - x.sinergia || y.conResultado - x.conResultado || (x.clave < y.clave ? -1 : 1);
   });
   const fuera = lista.filter(function (e) { return e.faltan > 0; }).sort(function (x, y) {
-    return y.finalizadas - x.finalizadas || (y.pct || 0) - (x.pct || 0) || (x.clave < y.clave ? -1 : 1);
+    return y.conResultado - x.conResultado || (y.pct || 0) - (x.pct || 0) || (x.clave < y.clave ? -1 : 1);
   });
   dentro.forEach(function (e, i) { e.posicion = i + 1; });
   return dentro.concat(fuera);

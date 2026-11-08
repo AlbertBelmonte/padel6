@@ -121,6 +121,7 @@
   }
   .chip-programada { background: var(--acento-suave); color: var(--acento); }
   .chip-cortada { background: var(--aviso-suave); color: var(--aviso); }
+  .chip-empatada { background: var(--superficie-2); color: var(--texto); }
   .chip-error { background: var(--peligro-suave); color: var(--peligro); }
 
   .vacio { color: var(--suave); padding: 14px 0; margin: 0; }
@@ -170,6 +171,7 @@
   }
   .forma .f.V { background: var(--acento); color: var(--acento-texto); }
   .forma .f.D { background: var(--peligro-suave); color: var(--peligro); }
+  .forma .f.E { background: var(--superficie-2); color: var(--texto); border: 1px solid var(--borde); }
   .forma .texto-racha { font-size: 13px; color: var(--suave); margin-left: 4px; }
   .lista-datos { margin: 0; padding: 0; }
   .lista-datos div { display: flex; justify-content: space-between; gap: 12px; padding: 9px 14px; border-top: 1px solid var(--borde); font-size: 15px; }
@@ -345,7 +347,7 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbwRtCixP2FUUnqqk7diRqpuL8gOVpttruZmStHmS-oj8a7PfZXXaVLIhrgj5GNyTsks/exec';
 const CLAVE_DATOS = 'padel6.datos';
 const CLAVE_PIN = 'padel6.pin';
-const MINIMO_RANKING = 5; // partidas finalizadas para tener posición en los rankings individuales
+const MINIMO_RANKING = 5; // partidas con resultado (finalizadas o empatadas) para tener posición en los rankings individuales
 const REFRESCO_MIN_MS = 60 * 1000; // al volver a la app, refresca si han pasado más de 60 s
 
 // ─── Estado de la app ─────────────────────────────────────────────────────────
@@ -583,7 +585,7 @@ function tarjetaPartida(p) {
 
   let chips = '';
   if (p.errores.length) chips += '<span class="chip chip-error">error</span>';
-  if (p.estado !== 'finalizada') chips += '<span class="chip chip-' + esc(p.estado) + '">' + esc(p.estado || 'sin estado') + '</span>';
+  if (p.estado !== 'finalizada') chips += '<span class="chip chip-' + esc(p.estado) + '">' + esc(p.estado === 'empatada' ? 'empate' : (p.estado || 'sin estado')) + '</span>';
 
   let pie = '';
   if (p.errores.length && editable) pie = '<div class="pie-tarjeta error">' + esc(p.errores.join(' · ')) + '</div>';
@@ -614,7 +616,7 @@ function vistaInicio() {
   const partidas = app.datos.partidas.filter(function (p) { return !p.errores.length; });
   const programadas = partidas.filter(function (p) { return p.estado === 'programada'; });
   const ultimas = partidas
-    .filter(function (p) { return p.estado === 'finalizada' || p.estado === 'cortada'; })
+    .filter(function (p) { return ESTADOS_MARCADOR.indexOf(p.estado) !== -1; })
     .slice(-5).reverse();
 
   let h = avisoErrores();
@@ -651,7 +653,7 @@ function tablaRanking() {
 
   const contadas = app.elo.historial.length;
   return '<div class="tarjeta ranking"><ol>' + items + '</ol></div>' +
-    '<p class="nota-rk">' + contadas + (contadas === 1 ? ' partida finalizada' : ' partidas finalizadas') +
+    '<p class="nota-rk">' + contadas + (contadas === 1 ? ' partida con resultado' : ' partidas con resultado') +
     ' desde el 31 ago 2026. Mínimo ' + MINIMO_RANKING + ' para clasificar. Diferencias de menos de 15 puntos no son significativas.</p>';
 }
 
@@ -692,6 +694,14 @@ function signo(x, decimales) {
 
 function deTotal(a, b) { return a + ' de ' + b; }
 
+/** '3–1' o, si hay empates, '3–1–1' (victorias–empates–derrotas). */
+function marcadorVED(v, e, d) { return e ? v + '–' + e + '–' + d : v + '–' + d; }
+
+/** '2 de 3' o, si hay empates, '2 V · 1 E de 4'. */
+function balance(x) {
+  return x.empates ? x.victorias + ' V · ' + x.empates + ' E de ' + (x.victorias + x.empates + x.derrotas) : deTotal(x.victorias, x.victorias + x.derrotas);
+}
+
 function vistaJugador() {
   const d = app.datos;
   const j = d.jugadoresPorId[app.fichaId];
@@ -723,14 +733,15 @@ function vistaJugador() {
   const dif = s.difJuegosPorPartida;
   h += '<h2>Resumen</h2><div class="tiles">' +
     tile('Partidas', s.partidas, pct(s.asistencia.pct) + ' de las del grupo') +
-    tile('Victorias', s.victorias + '–' + s.derrotas, (s.finalizadas ? pct(s.pctVictorias) + ' de victorias' : 'sin partidas finalizadas')) +
+    tile('Victorias', marcadorVED(s.victorias, s.empates, s.derrotas),
+      s.conResultado ? pct(s.pctVictorias) + (s.empates ? ' · V–E–D, empate = ½' : ' de victorias') : 'sin partidas con resultado') +
     tile('Juegos', pct(s.pctJuegos), s.juegosGanados + '–' + s.juegosPerdidos) +
     tile('Diferencia de juegos', (dif > 0 ? '+' : (dif < 0 ? '−' : '')) + Math.abs(dif).toFixed(1).replace('.', ','), 'por partida') +
     '</div>';
 
   // Forma y rachas
   h += '<h2>Forma</h2><div class="tarjeta"><div class="forma">' +
-    s.forma.map(function (x) { return '<span class="f ' + x + '" title="' + ({ V: 'Victoria', D: 'Derrota', C: 'Cortada' })[x] + '">' + x + '</span>'; }).join('') +
+    s.forma.map(function (x) { return '<span class="f ' + x + '" title="' + ({ V: 'Victoria', D: 'Derrota', E: 'Empate', C: 'Cortada' })[x] + '">' + x + '</span>'; }).join('') +
     '<span class="texto-racha">' + textoRacha(s.rachaActual) + '</span></div>' +
     '<div class="pie-tarjeta">Mejor racha: ' + s.rachaMaxVictorias + (s.rachaMaxVictorias === 1 ? ' victoria' : ' victorias') +
     ' · Peor racha: ' + s.rachaMaxDerrotas + (s.rachaMaxDerrotas === 1 ? ' derrota' : ' derrotas') +
@@ -740,10 +751,13 @@ function vistaJugador() {
   const datos = [
     ['Sets ganados – perdidos', s.setsGanados + ' – ' + s.setsPerdidos],
     ['Tie-breaks ganados – perdidos', s.tiebreaksGanados + ' – ' + s.tiebreaksPerdidos],
-    ['Partidas a 3 sets ganadas', s.a3Sets.jugadas ? deTotal(s.a3Sets.ganadas, s.a3Sets.jugadas) : '–'],
+    ['Partidas a 3 sets ganadas', s.a3Sets.jugadas
+      ? (s.a3Sets.empatadas ? s.a3Sets.ganadas + ' V · ' + s.a3Sets.empatadas + ' E de ' + s.a3Sets.jugadas : deTotal(s.a3Sets.ganadas, s.a3Sets.jugadas)) + ' · ' + pct(s.a3Sets.pct)
+      : '–'],
     ['Remontadas', s.remontadas],
     ['Roscos dados – recibidos', s.roscosDados + ' – ' + s.roscosRecibidos]
   ];
+  if (s.empatadas) datos.push(['Empates', s.empatadas]);
   if (s.cortadas) datos.push(['Partidas cortadas', s.cortadas]);
   h += '<h2>Detalle</h2><div class="tarjeta" style="padding:0"><dl class="lista-datos">' +
     datos.map(function (x) { return '<div><dt>' + esc(x[0]) + '</dt><dd>' + esc(x[1]) + '</dd></div>'; }).join('') + '</dl></div>';
@@ -755,7 +769,7 @@ function vistaJugador() {
   h += '<h2>Rivales</h2>' +
     destacados([['Víctima favorita', s.victimaFavorita], ['Bestia negra', s.bestiaNegra]]) +
     tablaCruces(s.rivales);
-  h += '<p class="nota-rk">Victorias con cada compañero y contra cada rival, en partidas finalizadas. Mejor y peor compañero, bestia negra y víctima favorita necesitan ' +
+  h += '<p class="nota-rk">Victorias con cada compañero y contra cada rival, en partidas con resultado (un empate vale media victoria). Mejor y peor compañero, bestia negra y víctima favorita necesitan ' +
     MINIMO_CRUCE + ' partidas; las filas atenuadas no llegan. Las partidas con invitado cuentan en lo individual, pero no aquí.</p>';
   return h;
 }
@@ -768,6 +782,7 @@ function tile(etiqueta, valor, sub) {
 function textoRacha(r) {
   if (!r) return 'Sin racha';
   if (r.tipo === 'V') return 'Racha: ' + r.n + (r.n === 1 ? ' victoria' : ' victorias');
+  if (r.tipo === 'E') return 'Racha: ' + r.n + (r.n === 1 ? ' empate' : ' empates');
   return 'Racha: ' + r.n + (r.n === 1 ? ' derrota' : ' derrotas');
 }
 
@@ -775,16 +790,16 @@ function destacados(lista) {
   return '<div class="destacados">' + lista.map(function (x) {
     const e = x[1];
     return '<div class="destacado"><div class="etq-tile">' + esc(x[0]) + '</div>' +
-      (e ? '<strong>' + esc(nombre(e.id)) + '</strong><span>' + deTotal(e.victorias, e.partidas) + ' · ' + pct(e.pct) + '</span>'
+      (e ? '<strong>' + esc(nombre(e.id)) + '</strong><span>' + balance(e) + ' · ' + pct(e.pct) + '</span>'
          : '<strong>–</strong><span>nadie cumple</span>') + '</div>';
   }).join('') + '</div>';
 }
 
 function tablaCruces(lista) {
-  if (!lista.length) return vacio('Sin partidas finalizadas en este periodo.');
+  if (!lista.length) return vacio('Sin partidas con resultado en este periodo.');
   return '<div class="tarjeta cruces" style="padding:0">' + lista.map(function (e) {
     return '<div class="cruce' + (e.partidas < MINIMO_CRUCE ? ' pocas' : '') + '"><span class="n">' + esc(nombre(e.id)) + '</span>' +
-      '<span class="c">' + deTotal(e.victorias, e.partidas) + '</span><span class="p">' + pct(e.pct) + '</span></div>';
+      '<span class="c">' + balance(e) + '</span><span class="p">' + pct(e.pct) + '</span></div>';
   }).join('') + '</div>';
 }
 
@@ -806,15 +821,16 @@ function vistaParejas() {
   const peor = dentro.length >= 2 ? dentro[dentro.length - 1] : null;
   const caja = function (titulo, e) {
     return '<div class="destacado"><div class="etq-tile">' + titulo + '</div>' +
-      (e ? '<strong>' + esc(nombrePareja(e)) + '</strong><span>' + deTotal(e.victorias, e.finalizadas) + ' · ' + pct(e.pct) + '</span>'
+      (e ? '<strong>' + esc(nombrePareja(e)) + '</strong><span>' + balance(e) + ' · ' + pct(e.pct) + '</span>'
          : '<strong>–</strong><span>ninguna llega a ' + MINIMO_PAREJA + ' partidas</span>') + '</div>';
   };
   h += '<h2>Mejor y peor pareja</h2><div class="destacados">' + caja('Mejor pareja', mejor) + caja('Peor pareja', peor) + '</div>';
 
   h += '<h2>Todas las parejas</h2><div class="tarjeta ranking"><ol>' + jugadas.map(function (e) {
     const fuera = e.posicion === null;
-    const partes = [e.finalizadas + (e.finalizadas === 1 ? ' partida' : ' partidas')];
-    if (e.partidas > e.finalizadas) partes.push((e.partidas - e.finalizadas) + ' cortada' + (e.partidas - e.finalizadas === 1 ? '' : 's'));
+    const partes = [e.conResultado + (e.conResultado === 1 ? ' partida' : ' partidas')];
+    if (e.empates) partes.push(e.empates + (e.empates === 1 ? ' empate' : ' empates'));
+    if (e.partidas > e.conResultado) partes.push((e.partidas - e.conResultado) + ' cortada' + (e.partidas - e.conResultado === 1 ? '' : 's'));
     partes.push(pct(e.pctJuegos) + ' de juegos');
     if (e.sinergia !== null) partes.push('sinergia ' + signo(e.sinergia, 1));
     if (fuera) partes.push('faltan ' + e.faltan + ' para clasificar');
@@ -829,7 +845,7 @@ function vistaParejas() {
       nunca.map(function (e) { return esc(nombrePareja(e)); }).join(' · ') + '.</p>';
   }
   h += '<p class="nota-rk">Ordenadas por % de victorias juntos; hacen falta ' + MINIMO_PAREJA +
-    ' partidas finalizadas para clasificar. La sinergia son las victorias de más (o de menos) respecto a lo que predecía el ELO de sus dos jugadores: +1,0 equivale a una victoria inesperada. Las parejas con invitado no cuentan.</p>';
+    ' partidas con resultado para clasificar; un empate vale media victoria. La sinergia son las victorias de más (o de menos) respecto a lo que predecía el ELO de sus dos jugadores: +1,0 equivale a una victoria inesperada. Las parejas con invitado no cuentan.</p>';
   return h;
 }
 
@@ -1010,8 +1026,10 @@ function vistaResultado() {
   } else if (r.estado === 'finalizada') {
     const ganadores = r.ganador === 'A' ? nombre(e.a1) + ' y ' + nombre(e.a2) : nombre(e.b1) + ' y ' + nombre(e.b2);
     h += '<div class="resumen-res ok">Finalizada · ganan ' + esc(ganadores) + '</div>';
+  } else if (r.estado === 'empatada') {
+    h += '<div class="resumen-res ok">Empate · un set cada pareja y el tercero sin terminar</div>';
   } else {
-    h += '<div class="resumen-res">Cortada · sin ganador</div>';
+    h += '<div class="resumen-res">Cortada · sin resultado (no se completaron dos sets)</div>';
   }
 
   h += '<label class="campo" for="notasEdicion" style="margin-top:14px">Notas (opcional)</label>' +

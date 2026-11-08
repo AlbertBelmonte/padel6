@@ -248,9 +248,11 @@ comprobarSets('6-4 6-3 6-7', { estado: 'finalizada', ganador: 'A', setDecisivo: 
 comprobarSets('6-4 6-3 6-6', { estado: 'finalizada', ganador: 'A', setDecisivo: 2, completos: [true, true, false], sinDecidir: [false, false, true] });
 comprobarSets('6-2 2-6 6-3', { estado: 'finalizada', ganador: 'A', setDecisivo: 3, sinDecidir: [false, false, false] });
 comprobarSets('5-7 6-2 6-4', { estado: 'finalizada', ganador: 'A', setDecisivo: 3 });
-comprobarSets('6-4 4-6', { estado: 'cortada', ganador: null, setDecisivo: null });
+comprobarSets('6-4 4-6', { estado: 'empatada', ganador: null, setDecisivo: null });
+comprobarSets('6-4 4-6 5-2', { estado: 'empatada', ganador: null, setDecisivo: null, completos: [true, true, false] });
 comprobarSets('6-4 3-2', { estado: 'cortada', ganador: null, setDecisivo: null, completos: [true, false] });
-comprobarSets('6-4 4-6 6-6', { estado: 'cortada', ganador: null, setDecisivo: null });
+comprobarSets('6-4 4-6 6-6', { estado: 'empatada', ganador: null, setDecisivo: null });
+comprobarSets('7-6 3-6 6-4', { estado: 'finalizada', ganador: 'A', setDecisivo: 3 });
 comprobarSets('6-4', { estado: 'cortada', ganador: null, setDecisivo: null });
 comprobarSets('3-2', { estado: 'cortada', ganador: null, setDecisivo: null, completos: [false] });
 comprobarSets('', { estado: null, ganador: null, setDecisivo: null });
@@ -276,7 +278,9 @@ grupo('calcularEstado');
 
 prueba('6-4 6-3 → finalizada', () => igual(calcularEstado(P('6-4 6-3')), 'finalizada'));
 prueba('6-4 6-3 5-3 → finalizada', () => igual(calcularEstado(P('6-4 6-3 5-3')), 'finalizada'));
-prueba('6-4 4-6 → cortada', () => igual(calcularEstado(P('6-4 4-6')), 'cortada'));
+prueba('6-4 4-6 → empatada', () => igual(calcularEstado(P('6-4 4-6')), 'empatada'));
+prueba('6-4 4-6 5-2 → empatada', () => igual(calcularEstado(P('6-4 4-6 5-2')), 'empatada'));
+prueba('6-4 3-2 → cortada (no llegó a dos sets)', () => igual(calcularEstado(P('6-4 3-2')), 'cortada'));
 prueba('sin sets → null', () => igual(calcularEstado(P('')), null));
 prueba('marcador con errores → null', () => igual(calcularEstado(P('7-3')), null));
 
@@ -285,7 +289,9 @@ grupo('validarPartida');
 const casosValidos = [
   ['finalizada 6-4 6-3', P('6-4 6-3')],
   ['finalizada con set sin decidir incompleto', P('6-4 6-3 5-3')],
-  ['cortada 6-4 4-6', P('6-4 4-6', { estado: 'cortada' })],
+  ['cortada 6-4 3-2', P('6-4 3-2', { estado: 'cortada' })],
+  ['empatada 6-4 4-6', P('6-4 4-6', { estado: 'empatada' })],
+  ['empatada con tercer set a medias', P('6-4 4-6 5-2', { estado: 'empatada' })],
   ['programada sin sets', P('', { estado: 'programada' })],
   ['cancelada sin sets', P('', { estado: 'cancelada' })],
   ['con 1 invitado', P('6-4 6-3', { a2: 'J07' })],
@@ -300,6 +306,9 @@ const casosInvalidos = [
   ['cancelada con juegos', P('6-4 6-3', { estado: 'cancelada' })],
   ['2-0 marcada como cortada', P('6-4 6-3', { estado: 'cortada' })],
   ['1-1 marcada como finalizada', P('6-4 4-6', { estado: 'finalizada' })],
+  ['1-1 marcada como cortada', P('6-4 4-6', { estado: 'cortada' })],
+  ['2-0 marcada como empatada', P('6-4 6-3', { estado: 'empatada' })],
+  ['un set marcado como empatada', P('6-4 3-2', { estado: 'empatada' })],
   ['finalizada sin sets', P('', { estado: 'finalizada' })],
   ['cortada sin sets', P('', { estado: 'cortada' })],
   ['marcador con errores', P('7-3', { estado: 'cortada' })],
@@ -492,7 +501,7 @@ prueba('el set sin decidir no cambia nada', () => {
 });
 prueba('cortadas, programadas, canceladas y partidas con errores no cuentan', () => {
   const e = calcularElo([
-    P('6-4 4-6', { estado: 'cortada', errores: [] }),
+    P('6-4 3-2', { estado: 'cortada', errores: [] }),
     P('', { estado: 'programada', errores: [] }),
     P('', { estado: 'cancelada', errores: [] }),
     P('6-4 6-3', { errores: ['algo'] })
@@ -522,6 +531,22 @@ prueba('histórico: valores redondeados con K = 32', () => {
 });
 prueba('histórico: partidas que cuentan para cada uno', () => {
   igual(eloHistorico().partidas, { J01: 16, J02: 9, J03: 13, J04: 8, J05: 8, J06: 11 });
+});
+prueba('empate entre iguales: nadie se mueve, pero cuenta como partida', () => {
+  const e = calcularElo([P('6-4 4-6', { estado: 'empatada', errores: [] })], POR_ID);
+  igual(e.ratings.J01, 1000, 'J01'); igual(e.ratings.J03, 1000, 'J03');
+  igual(e.historial[0].SA, 0.5, 'SA');
+  igual(e.partidas.J01, 1, 'partidas');
+});
+prueba('empate tras una victoria: el favorito pierde y el otro gana lo mismo', () => {
+  const e = calcularElo([
+    P('6-4 6-3', { id_partida: '20261101-1', fecha: '2026-11-01', errores: [] }),
+    P('6-4 4-6', { id_partida: '20261102-1', fecha: '2026-11-02', estado: 'empatada', errores: [] })
+  ], POR_ID);
+  const d = e.historial[1].cambios;
+  cierto(d.J01.delta < 0 && d.J03.delta > 0, 'signos ' + d.J01.delta + ' / ' + d.J03.delta);
+  cierto(Math.abs(d.J01.delta + d.J03.delta) < 1e-9, 'mismo valor');
+  cierto(Math.abs(d.J01.delta - 32 * (0.5 - 1 / (1 + Math.pow(10, -32 / 400)))) < 1e-9, 'fórmula');
 });
 prueba('acepta K e inicial como opciones', () => {
   const e = calcularElo([P('6-4 6-3', { errores: [] })], POR_ID, { inicial: 1500, K: 20 });
@@ -633,6 +658,30 @@ prueba('una cortada suma juegos y forma, pero no rompe la racha', () => {
   igual([s.setsGanados, s.setsPerdidos], [5, 0], 'sets (el 3-2 no cuenta)');
   igual([s.juegosGanados, s.juegosPerdidos], [33, 15], 'juegos (el 3-2 sí)');
 });
+prueba('empate: media victoria, corta la racha, sale como E y cuenta a 3 sets', () => {
+  const partidas = [
+    P('6-4 6-3', { id_partida: '20261101-1', fecha: '2026-11-01', errores: [] }),
+    P('6-4 6-3', { id_partida: '20261102-1', fecha: '2026-11-02', errores: [] }),
+    P('6-4 4-6 5-2', { id_partida: '20261103-1', fecha: '2026-11-03', estado: 'empatada', errores: [] }),
+    P('6-1 6-1', { id_partida: '20261104-1', fecha: '2026-11-04', errores: [] })
+  ];
+  const s = statsJugador('J01', partidas, POR_ID);
+  igual([s.conResultado, s.finalizadas, s.empatadas], [4, 3, 1], 'partidas');
+  igual([s.victorias, s.empates, s.derrotas], [3, 1, 0], 'V-E-D');
+  igual(s.pctVictorias, 3.5 / 4, '% victorias');
+  igual(s.forma, ['V', 'V', 'E', 'V'], 'forma');
+  igual(s.rachaActual, { tipo: 'V', n: 1 }, 'racha actual');
+  igual(s.rachaMaxVictorias, 2, 'racha máxima');
+  igual([s.a3Sets.jugadas, s.a3Sets.ganadas, s.a3Sets.empatadas, s.a3Sets.pct], [1, 0, 1, 0.5], 'a 3 sets');
+  igual([s.setsGanados, s.setsPerdidos, s.juegosGanados, s.juegosPerdidos], [7, 1, 51, 28], 'sets y juegos');
+  const c = s.companeros.find(e => e.id === 'J02');
+  igual([c.partidas, c.victorias, c.empates, c.pct], [4, 3, 1, 3.5 / 4], 'compañero');
+});
+prueba('empate como última partida: racha de 1 empate', () => {
+  const s = statsJugador('J01', [P('6-4 4-6', { estado: 'empatada', errores: [] })], POR_ID);
+  igual(s.rachaActual, { tipo: 'E', n: 1 }, 'racha');
+  igual([s.rachaMaxVictorias, s.rachaMaxDerrotas], [0, 0], 'máximas');
+});
 prueba('sin partidas: todo a cero y porcentajes null', () => {
   const s = statsJugador('J01', [], POR_ID);
   igual([s.partidas, s.pctVictorias, s.pctJuegos, s.rachaActual, s.asistencia.pct], [0, null, null, null, null]);
@@ -653,7 +702,7 @@ prueba('salen las 15 parejas de fijos activos y ninguna con invitado', () => {
 prueba('histórico: las 4 parejas con 3 o más partidas, en orden', () => {
   const p = parejasHistorico().filter(e => e.posicion !== null);
   igual(p.map(e => e.clave), ['J02-J03', 'J01-J05', 'J01-J06', 'J01-J03'], 'orden');
-  igual(p.map(e => [e.victorias, e.finalizadas]), [[3, 3], [2, 3], [2, 4], [1, 4]], 'victorias');
+  igual(p.map(e => [e.victorias, e.conResultado]), [[3, 3], [2, 3], [2, 4], [1, 4]], 'victorias');
 });
 prueba('las que no llegan al mínimo van detrás, sin posición y con lo que les falta', () => {
   const fuera = parejasHistorico().filter(e => e.posicion === null);
@@ -667,13 +716,18 @@ prueba('sinergia: entre iguales, ganar suma +0,5 y perder −0,5', () => {
   const de = k => p.find(e => e.clave === k);
   igual(de('J01-J02').sinergia, 0.5, 'ganadores');
   igual(de('J03-J04').sinergia, -0.5, 'perdedores');
-  igual(de('J01-J03').finalizadas, 0, 'una pareja que no jugó');
+  igual(de('J01-J03').conResultado, 0, 'una pareja que no jugó');
   igual(de('J01-J03').sinergia, null, 'sin sinergia');
+});
+prueba('empate de pareja: 50 % y sinergia 0 entre iguales; cuenta para el mínimo', () => {
+  const partidas = [P('6-4 4-6', { estado: 'empatada', errores: [] })];
+  const e = statsParejas(partidas, POR_ID, calcularElo(partidas, POR_ID)).find(x => x.clave === 'J01-J02');
+  igual([e.conResultado, e.empates, e.pct, e.sinergia, e.faltan], [1, 1, 0.5, 0, 2]);
 });
 prueba('una cortada suma partidas y juegos, pero no victorias', () => {
   const partidas = [P('6-4 3-2', { estado: 'cortada', errores: [] })];
   const e = statsParejas(partidas, POR_ID, calcularElo(partidas, POR_ID)).find(x => x.clave === 'J01-J02');
-  igual([e.partidas, e.finalizadas, e.victorias, e.juegosGanados, e.juegosPerdidos], [1, 0, 0, 9, 6]);
+  igual([e.partidas, e.conResultado, e.victorias, e.juegosGanados, e.juegosPerdidos], [1, 0, 0, 9, 6]);
 });
 prueba('la pareja de dos fijos que juega contra un invitado sí cuenta', () => {
   const partidas = [P('6-4 6-3', { b2: 'J07', errores: [] })];
