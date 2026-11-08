@@ -30,6 +30,8 @@
     --aviso: #8a5a00;
     --aviso-suave: #fdf0d5;
     --radio: 12px;
+    --celda-verde: #2f9e5f;
+    --celda-roja: #d0473e;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
@@ -47,6 +49,8 @@
       --peligro-suave: #3d1f1d;
       --aviso: #f4c766;
       --aviso-suave: #3a2f14;
+      --celda-verde: #3fae6f;
+      --celda-roja: #c9483f;
       color-scheme: dark;
     }
   }
@@ -198,6 +202,33 @@
     font-size: 14px; font-weight: 600; color: var(--suave);
   }
   .pestanas button.activa { background: var(--superficie); color: var(--texto); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+
+  /* Gráfico del ELO */
+  .grafico { padding: 10px 10px 6px; }
+  .grafico svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .grafico .linea { fill: none; stroke: var(--acento); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+  .grafico .area { fill: var(--acento); opacity: .10; }
+  .grafico .ref { stroke: var(--suave); stroke-width: 1; stroke-dasharray: 4 4; opacity: .7; }
+  .grafico .punto { fill: var(--superficie); stroke: var(--acento); stroke-width: 2; }
+  .grafico .punto.ultimo { fill: var(--acento); }
+  .grafico text { fill: var(--suave); font-size: 11px; font-family: inherit; }
+  .grafico text.fuerte { fill: var(--texto); font-weight: 700; }
+  .grafico .marca { fill: var(--acento); }
+  .grafico .marca.min { fill: var(--peligro); }
+
+  /* Matrices */
+  .matriz-caja { padding: 8px 6px; overflow-x: auto; }
+  table.matriz { width: 100%; border-collapse: separate; border-spacing: 3px; table-layout: fixed; }
+  table.matriz th { font-size: 11px; font-weight: 700; color: var(--suave); padding: 2px 0; text-align: center; }
+  table.matriz th.fila { text-align: left; padding-left: 2px; }
+  table.matriz td {
+    height: 40px; text-align: center; border-radius: 6px; font-size: 13px; font-weight: 700;
+    font-variant-numeric: tabular-nums; background: var(--superficie-2); line-height: 1.1; padding: 0;
+  }
+  table.matriz td small { display: block; font-size: 10px; font-weight: 500; color: var(--suave); }
+  table.matriz td.diag { background: transparent; }
+  table.matriz td.vacia { color: var(--suave); font-weight: 400; }
+  .leyenda { font-size: 12px; color: var(--suave); margin: 6px 2px 0; }
 
   /* Avisos de versión */
   .aviso-version {
@@ -364,7 +395,7 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbwRtCixP2FUUnqqk7diRqpuL8gOVpttruZmStHmS-oj8a7PfZXXaVLIhrgj5GNyTsks/exec';
 const CLAVE_DATOS = 'padel6.datos';
 const CLAVE_PIN = 'padel6.pin';
-const VERSION_APP = '2026-11-08.02'; // se sube en cada entrega de index.html
+const VERSION_APP = '2026-11-08.03'; // se sube en cada entrega de index.html
 const CLAVE_PESTANA = 'padel6.pestanaRanking';
 const MINIMO_RANKING = 5; // partidas con resultado (finalizadas o empatadas) para tener posición en los rankings individuales
 const REFRESCO_MIN_MS = 60 * 1000; // al volver a la app, refresca si han pasado más de 60 s
@@ -377,6 +408,7 @@ const app = {
   elo: null,            // resultado de calcularElo con todas las partidas
   versionServidor: undefined, // VERSION_LOGICA que devuelve doGet (null si Codigo.gs es antiguo)
   pestana: leer(CLAVE_PESTANA) || 'elo', // pestaña del ranking en Inicio
+  matriz: 'companeros', // matriz que se ve en Parejas
   errorCarga: null,
   actualizando: false,
   sinConexion: false,
@@ -802,6 +834,7 @@ function vistaJugador() {
     (app.elo.ratings[j.id_jugador] !== undefined
       ? '<div class="elo-grande">' + Math.round(app.elo.ratings[j.id_jugador]) + '<small>ELO</small></div>' : '') +
     '</div>';
+  if (j.tipo === 'fijo') h += '<h2>Evolución del ELO</h2>' + graficoElo(serieElo(app.elo, j.id_jugador));
   h += selector;
 
   const s = statsJugador(j.id_jugador, filtrarPeriodo(d.partidas, periodoDe(app.periodo), hoy()), d.jugadoresPorId, { minimo: MINIMO_CRUCE });
@@ -881,6 +914,124 @@ function tablaCruces(lista) {
   }).join('') + '</div>';
 }
 
+// ─── Gráfico del ELO (SVG propio, sin librerías) ──────────────────────────────
+
+function graficoElo(serie) {
+  if (!serie.length) return vacio('Todavía no tiene partidas que cuenten para el ELO.');
+
+  const valores = [serie[0].antes].concat(serie.map(function (x) { return x.despues; }));
+  const fechas = [null].concat(serie.map(function (x) { return x.fecha; }));
+  const W = 340, H = 170, izq = 34, der = 10, arr = 16, aba = 22;
+  let min = Math.min.apply(null, valores.concat([ELO_INICIAL]));
+  let max = Math.max.apply(null, valores.concat([ELO_INICIAL]));
+  const margen = Math.max(10, (max - min) * 0.12);
+  min -= margen; max += margen;
+
+  const X = function (i) { return izq + (valores.length === 1 ? (W - izq - der) / 2 : i * (W - izq - der) / (valores.length - 1)); };
+  const Y = function (v) { return arr + (max - v) * (H - arr - aba) / (max - min); };
+  const r = function (n) { return Math.round(n * 10) / 10; };
+
+  const puntos = valores.map(function (v, i) { return r(X(i)) + ',' + r(Y(v)); });
+  const linea = '<polyline class="linea" points="' + puntos.join(' ') + '"/>';
+  const area = '<polygon class="area" points="' + r(X(0)) + ',' + r(Y(min)) + ' ' + puntos.join(' ') + ' ' +
+    r(X(valores.length - 1)) + ',' + r(Y(min)) + '"/>';
+  const yRef = r(Y(ELO_INICIAL));
+  const ref = '<line class="ref" x1="' + izq + '" x2="' + (W - der) + '" y1="' + yRef + '" y2="' + yRef + '"/>' +
+    '<text x="' + (izq - 4) + '" y="' + (yRef + 4) + '" text-anchor="end">' + ELO_INICIAL + '</text>';
+
+  // Máximo y mínimo alcanzados (sin contar el 1000 de salida)
+  const reales = valores.slice(1);
+  const iMax = valores.indexOf(Math.max.apply(null, reales), 1);
+  const iMin = valores.indexOf(Math.min.apply(null, reales), 1);
+  const etiqueta = function (i, clase, texto) {
+    const x = r(X(i)), y = r(Y(valores[i]));
+    const arriba = clase !== 'min';
+    const anc = x < izq + 30 ? 'start' : (x > W - der - 30 ? 'end' : 'middle');
+    return '<circle class="marca ' + clase + '" cx="' + x + '" cy="' + y + '" r="4"/>' +
+      '<text class="fuerte" x="' + x + '" y="' + (arriba ? y - 8 : y + 16) + '" text-anchor="' + anc + '">' + texto + '</text>';
+  };
+  let marcas = '';
+  if (reales.length > 1 && iMax !== iMin) {
+    marcas += etiqueta(iMax, 'max', 'máx ' + Math.round(valores[iMax]));
+    marcas += etiqueta(iMin, 'min', 'mín ' + Math.round(valores[iMin]));
+  }
+
+  // Puntos (solo si caben) y el último resaltado
+  let circulos = '';
+  if (valores.length <= 40) {
+    valores.forEach(function (v, i) {
+      if (i === 0) return;
+      circulos += '<circle class="punto' + (i === valores.length - 1 ? ' ultimo' : '') + '" cx="' + r(X(i)) + '" cy="' + r(Y(v)) + '" r="' + (i === valores.length - 1 ? 4 : 2.5) + '"/>';
+    });
+  }
+
+  const corta = function (f) { return new Date(f + 'T12:00:00').toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }); };
+  const ejes = '<text x="' + r(X(1 <= valores.length - 1 ? 1 : 0)) + '" y="' + (H - 4) + '" text-anchor="start">' + esc(corta(fechas[1])) + '</text>' +
+    (valores.length > 2 ? '<text x="' + (W - der) + '" y="' + (H - 4) + '" text-anchor="end">' + esc(corta(fechas[fechas.length - 1])) + '</text>' : '');
+
+  const actual = valores[valores.length - 1];
+  const resumen = 'ELO de ' + Math.round(serie[0].antes) + ' a ' + Math.round(actual) + ' en ' + serie.length + (serie.length === 1 ? ' partida' : ' partidas');
+  return '<div class="tarjeta grafico"><svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(resumen) + '">' +
+    area + ref + linea + circulos + marcas + ejes + '</svg>' +
+    '<div class="pie-tarjeta">' + esc(resumen) + '. Siempre con todo el histórico.</div></div>';
+}
+
+// ─── Matrices ─────────────────────────────────────────────────────────────────
+
+/** Abreviaturas de 3 letras, alargadas si dos coinciden. */
+function abreviaturas(ids) {
+  const nombres = ids.map(function (id) { return texto(nombre(id)).toUpperCase(); });
+  let largo = 3;
+  while (largo < 8) {
+    const abrev = nombres.map(function (n) { return n.slice(0, largo); });
+    if (new Set(abrev).size === abrev.length) break;
+    largo++;
+  }
+  const res = {};
+  ids.forEach(function (id, i) { res[id] = nombres[i].slice(0, largo); });
+  return res;
+}
+
+function bloqueMatrices(partidas) {
+  const m = matrizParejas(partidas, app.datos.jugadoresPorId);
+  if (m.ids.length < 2) return '';
+  const ab = abreviaturas(m.ids);
+  const pest = [['companeros', 'Compañeros'], ['enfrentamientos', 'Enfrentamientos']];
+  let h = '<h2>Matrices</h2><div class="pestanas" role="tablist">' + pest.map(function (t) {
+    return '<button type="button" role="tab" data-accion="matriz" data-m="' + t[0] + '" aria-selected="' + (app.matriz === t[0]) + '"' +
+      (app.matriz === t[0] ? ' class="activa"' : '') + '>' + t[1] + '</button>';
+  }).join('') + '</div>';
+
+  const maxJuntos = Math.max.apply(null, Object.values(m.juntos).concat([1]));
+  const cab = '<tr><th></th>' + m.ids.map(function (id) { return '<th title="' + esc(nombre(id)) + '">' + esc(ab[id]) + '</th>'; }).join('') + '</tr>';
+  const filas = m.ids.map(function (x) {
+    return '<tr><th class="fila" title="' + esc(nombre(x)) + '">' + esc(ab[x]) + '</th>' + m.ids.map(function (y) {
+      if (x === y) return '<td class="diag"></td>';
+      if (app.matriz === 'companeros') {
+        const n = m.juntos[clavePareja(x, y)];
+        if (!n) return '<td class="vacia" title="' + esc(nombre(x) + ' y ' + nombre(y)) + ': nunca juntos">·</td>';
+        const intensidad = Math.round(12 + 43 * n / maxJuntos);
+        return '<td style="background: color-mix(in srgb, var(--celda-verde) ' + intensidad + '%, var(--superficie-2))" title="' +
+          esc(nombre(x) + ' y ' + nombre(y) + ': ' + n + (n === 1 ? ' partida juntos' : ' partidas juntos')) + '">' + n + '</td>';
+      }
+      const c = m.contra[x][y];
+      if (!c.partidas) return '<td class="vacia" title="' + esc(nombre(x) + ' contra ' + nombre(y)) + ': sin partidas">·</td>';
+      const dif = c.pct - 0.5;
+      const color = dif > 0 ? 'var(--celda-verde)' : 'var(--celda-roja)';
+      const intensidad = Math.round(10 + 45 * Math.abs(dif) * 2);
+      const fondo = dif === 0 ? 'var(--superficie-2)' : 'color-mix(in srgb, ' + color + ' ' + intensidad + '%, var(--superficie-2))';
+      const titulo = nombre(x) + ' contra ' + nombre(y) + ': ' + c.victorias + ' V' + (c.empates ? ', ' + c.empates + ' E' : '') + ', ' + c.derrotas + ' D';
+      return '<td style="background: ' + fondo + '" title="' + esc(titulo) + '">' + Math.round(c.pct * 100) + '<small>' + c.partidas + '</small></td>';
+    }).join('') + '</tr>';
+  }).join('');
+
+  h += '<div class="tarjeta matriz-caja"><table class="matriz">' + cab + filas + '</table></div>';
+  h += app.matriz === 'companeros'
+    ? '<p class="leyenda">Partidas jugadas juntos en el periodo (incluidas las cortadas). Cuanto más intenso, más veces; «·» es que nunca han jugado juntos.</p>'
+    : '<p class="leyenda">% de victorias del jugador de la fila contra el de la columna (empate = ½), en verde si gana más de la mitad y en rojo si menos. Debajo, las partidas. Solo partidas con resultado.</p>';
+  return h;
+}
+
 // ─── Vista: Parejas ───────────────────────────────────────────────────────────
 
 function nombrePareja(e) { return nombre(e.x) + ' y ' + nombre(e.y); }
@@ -924,6 +1075,7 @@ function vistaParejas() {
   }
   h += '<p class="nota-rk">Ordenadas por % de victorias juntos; hacen falta ' + MINIMO_PAREJA +
     ' partidas con resultado para clasificar; un empate vale media victoria. La sinergia son las victorias de más (o de menos) respecto a lo que predecía el ELO de sus dos jugadores: +1,0 equivale a una victoria inesperada. Las parejas con invitado no cuentan.</p>';
+  h += bloqueMatrices(filtrarPeriodo(d.partidas, periodoDe(app.periodo), hoy()));
   return h;
 }
 
@@ -1204,6 +1356,8 @@ const ACCIONES = {
   pestana: function (d) { app.pestana = d.p; guardar(CLAVE_PESTANA, d.p); pintar(); },
 
   recargar: function () { window.location.reload(); },
+
+  matriz: function (d) { app.matriz = d.m; pintar(); },
 
   ficha: function (d) {
     app.fichaId = d.id;

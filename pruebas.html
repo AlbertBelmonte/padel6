@@ -726,6 +726,52 @@ prueba('VERSION_LOGICA tiene el formato aaaa-mm-dd.nn', () => {
   cierto(/^\d{4}-\d{2}-\d{2}\.\d{2}$/.test(VERSION_LOGICA), VERSION_LOGICA);
 });
 
+grupo('matrizParejas y serieElo');
+
+prueba('matriz: los 6 fijos activos del fixture, sin invitados', () => {
+  const m = matrizParejas(partidasHistorico(), POR_ID);
+  igual(m.ids, ['J01', 'J02', 'J03', 'J04', 'J05', 'J06'], 'ids');
+  igual(Object.keys(m.juntos).length, 15, 'parejas');
+  igual(m.contra.J07, undefined, 'sin Ricart');
+});
+prueba('matriz de compañeros del histórico', () => {
+  const m = matrizParejas(partidasHistorico(), POR_ID);
+  igual([m.juntos['J01-J03'], m.juntos['J02-J03'], m.juntos['J04-J05']], [4, 3, 1]);
+  igual(Object.values(m.juntos).reduce((t, n) => t + n, 0), 31, 'total sin las parejas con Ricart');
+});
+prueba('matriz de enfrentamientos: Albert contra Evaristo y simetría', () => {
+  const m = matrizParejas(partidasHistorico(), POR_ID);
+  igual([m.contra.J01.J02.partidas, m.contra.J01.J02.victorias, m.contra.J01.J02.pct], [6, 0, 0], 'Albert contra Evaristo');
+  igual(m.contra.J02.J01.pct, 1, 'Evaristo contra Albert');
+  m.ids.forEach(x => m.ids.forEach(y => {
+    if (x === y) return;
+    igual(m.contra[x][y].victorias, m.contra[y][x].derrotas, x + '/' + y);
+  }));
+});
+prueba('matriz: el empate cuenta ½ y la cortada solo como compañeros', () => {
+  const m = matrizParejas([
+    P('6-4 4-6', { estado: 'empatada', errores: [] }),
+    P('6-4 3-2', { id_partida: '20261106-1', fecha: '2026-11-06', estado: 'cortada', errores: [] })
+  ], POR_ID);
+  igual(m.juntos['J01-J02'], 2, 'juntos');
+  igual([m.contra.J01.J03.partidas, m.contra.J01.J03.empates, m.contra.J01.J03.pct], [1, 1, 0.5], 'contra');
+  igual(m.contra.J01.J05.pct, null, 'sin partidas');
+});
+prueba('serieElo de Evaristo: 9 puntos y acaba en su ELO', () => {
+  const partidas = partidasHistorico();
+  const e = calcularElo(partidas, POR_ID);
+  const s = serieElo(e, 'J02');
+  igual(s.length, 9, 'puntos');
+  igual(s[0].antes, 1000, 'empieza en 1000');
+  igual(s[s.length - 1].despues, e.ratings.J02, 'acaba en su ELO');
+  igual(s[0].fecha, '2026-08-31', 'primera fecha');
+});
+prueba('serieElo de un invitado o de quien no ha jugado: vacía', () => {
+  const e = calcularElo(partidasHistorico(), POR_ID);
+  igual(serieElo(e, 'J07'), [], 'invitado');
+  igual(serieElo(calcularElo([], POR_ID), 'J01'), [], 'sin partidas');
+});
+
 grupo('statsParejas');
 
 function parejasHistorico() {

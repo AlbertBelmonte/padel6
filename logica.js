@@ -17,7 +17,7 @@
 
 // Versión de este archivo. Se sube en cada entrega que cambie logica.js (formato aaaa-mm-dd.nn).
 // doGet la devuelve desde logica.gs, y la app la compara con la suya para avisar si alguno está desactualizado.
-const VERSION_LOGICA = '2026-11-08.02';
+const VERSION_LOGICA = '2026-11-08.03';
 
 const ESTADOS = ['programada', 'finalizada', 'empatada', 'cortada', 'cancelada'];
 // Estados que se deducen del marcador y estados que tienen resultado (victoria, derrota o empate)
@@ -747,6 +747,79 @@ function statsParejas(partidas, jugadoresPorId, elo, opciones) {
   });
   dentro.forEach(function (e, i) { e.posicion = i + 1; });
   return dentro.concat(fuera);
+}
+
+// ─── Matrices y serie del ELO ─────────────────────────────────────────────────
+
+/**
+ * Datos de las matrices de compañeros y de enfrentamientos entre los fijos activos,
+ * sobre las partidas dadas (ya filtradas por periodo). Los invitados no aparecen.
+ * - juntos[clavePareja(x, y)] = partidas jugadas juntos (finalizadas, empatadas y cortadas sin errores).
+ * - contra[x][y] = { partidas, victorias, empates, derrotas, pct } de x contra y, solo en partidas con
+ *   resultado (finalizadas y empatadas); pct = (V + ½E) / partidas, o null sin partidas.
+ * Devuelve { ids, juntos, contra }, con `ids` los fijos activos ordenados por id.
+ */
+function matrizParejas(partidas, jugadoresPorId) {
+  const ids = Object.keys(jugadoresPorId)
+    .filter(function (id) { return jugadoresPorId[id].tipo === 'fijo' && jugadoresPorId[id].activo === true; })
+    .sort();
+  const esta = {};
+  ids.forEach(function (id) { esta[id] = true; });
+
+  const juntos = {};
+  const contra = {};
+  ids.forEach(function (x) {
+    contra[x] = {};
+    ids.forEach(function (y) {
+      if (x === y) return;
+      if (x < y) juntos[clavePareja(x, y)] = 0;
+      contra[x][y] = { partidas: 0, victorias: 0, empates: 0, derrotas: 0, pct: null };
+    });
+  });
+
+  partidas.forEach(function (p) {
+    if (ESTADOS_MARCADOR.indexOf(p.estado) === -1) return;
+    if (p.errores && p.errores.length) return;
+    [[p.a1, p.a2], [p.b1, p.b2]].forEach(function (par) {
+      if (esta[par[0]] && esta[par[1]]) juntos[clavePareja(par[0], par[1])]++;
+    });
+    if (ESTADOS_CON_RESULTADO.indexOf(p.estado) === -1) return;
+    const r = analizarSets(p);
+    [['a', 'b'], ['b', 'a']].forEach(function (lados) {
+      const gana = r.ganador === lados[0].toUpperCase();
+      [p[lados[0] + '1'], p[lados[0] + '2']].forEach(function (x) {
+        if (!esta[x]) return;
+        [p[lados[1] + '1'], p[lados[1] + '2']].forEach(function (y) {
+          if (!esta[y]) return;
+          const c = contra[x][y];
+          c.partidas++;
+          if (p.estado === 'empatada') c.empates++; else if (gana) c.victorias++; else c.derrotas++;
+        });
+      });
+    });
+  });
+
+  ids.forEach(function (x) {
+    ids.forEach(function (y) {
+      if (x === y) return;
+      const c = contra[x][y];
+      c.pct = porcentaje(c.victorias + c.empates / 2, c.partidas);
+    });
+  });
+  return { ids: ids, juntos: juntos, contra: contra };
+}
+
+/**
+ * Evolución del ELO de un jugador a partir de calcularElo: un punto por cada partida que le ha contado.
+ * Devuelve [{ id_partida, fecha, antes, despues, delta }] en orden cronológico ([] si no ha jugado).
+ */
+function serieElo(elo, id) {
+  return elo.historial
+    .filter(function (h) { return h.cambios[id] !== undefined; })
+    .map(function (h) {
+      const c = h.cambios[id];
+      return { id_partida: h.id_partida, fecha: h.fecha, antes: c.antes, despues: c.despues, delta: c.delta };
+    });
 }
 
 // ─── Orden y carga ────────────────────────────────────────────────────────────
