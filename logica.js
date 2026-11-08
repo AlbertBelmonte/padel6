@@ -15,6 +15,10 @@
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
+// Versión de este archivo. Se sube en cada entrega que cambie logica.js (formato aaaa-mm-dd.nn).
+// doGet la devuelve desde logica.gs, y la app la compara con la suya para avisar si alguno está desactualizado.
+const VERSION_LOGICA = '2026-11-08.02';
+
 const ESTADOS = ['programada', 'finalizada', 'empatada', 'cortada', 'cancelada'];
 // Estados que se deducen del marcador y estados que tienen resultado (victoria, derrota o empate)
 const ESTADOS_MARCADOR = ['finalizada', 'empatada', 'cortada'];
@@ -624,6 +628,47 @@ function statsJugador(id, partidas, jugadoresPorId, opciones) {
     })[0];
   }
   return s;
+}
+
+// ─── Rankings individuales por porcentaje ─────────────────────────────────────
+
+/**
+ * Ranking de los fijos activos por % de victorias o % de juegos, sobre las partidas dadas (ya filtradas por periodo).
+ * criterio 'victorias': valor = (V + ½E) / partidas con resultado; base del mínimo = partidas con resultado.
+ * criterio 'juegos':    valor = JG / (JG + JP);                     base del mínimo = partidas jugadas (cortadas incluidas).
+ * Los que llegan al mínimo van primero, por valor (y luego más partidas y nombre), con posicion;
+ * el resto después, con posicion = null y `faltan`.
+ * Devuelve [{ id, nombre, valor, base, posicion, faltan, stats }], con `stats` el resultado de statsJugador.
+ */
+function rankingIndividual(partidas, jugadores, jugadoresPorId, criterio, minimo) {
+  const min = minimo === undefined ? 5 : minimo;
+  if (criterio !== 'victorias' && criterio !== 'juegos') throw new Error('Criterio desconocido: ' + criterio);
+
+  const filas = jugadores
+    .filter(function (j) { return j.tipo === 'fijo' && j.activo === true; })
+    .map(function (j) {
+      const st = statsJugador(j.id_jugador, partidas, jugadoresPorId);
+      const base = criterio === 'victorias' ? st.conResultado : st.partidas;
+      return {
+        id: j.id_jugador,
+        nombre: j.nombre,
+        valor: criterio === 'victorias' ? st.pctVictorias : st.pctJuegos,
+        base: base,
+        posicion: null,
+        faltan: Math.max(0, min - base),
+        stats: st
+      };
+    });
+
+  const orden = function (x, y) {
+    const vx = x.valor === null ? -1 : x.valor;
+    const vy = y.valor === null ? -1 : y.valor;
+    return vy - vx || y.base - x.base || (x.nombre < y.nombre ? -1 : 1);
+  };
+  const dentro = filas.filter(function (f) { return f.faltan === 0; }).sort(orden);
+  const fuera = filas.filter(function (f) { return f.faltan > 0; }).sort(orden);
+  dentro.forEach(function (f, i) { f.posicion = i + 1; });
+  return dentro.concat(fuera);
 }
 
 // ─── Estadísticas de parejas ──────────────────────────────────────────────────

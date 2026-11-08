@@ -687,6 +687,45 @@ prueba('sin partidas: todo a cero y porcentajes null', () => {
   igual([s.partidas, s.pctVictorias, s.pctJuegos, s.rachaActual, s.asistencia.pct], [0, null, null, null, null]);
 });
 
+grupo('rankingIndividual');
+
+prueba('% de victorias del histórico, con empate a 3/8 resuelto por nombre', () => {
+  const r = rankingIndividual(partidasHistorico(), JUGADORES, POR_ID, 'victorias', 5);
+  igual(r.map(f => f.nombre), ['Evaristo', 'Albert', 'Jordi', 'Juan', 'Rafa', 'Santi'], 'orden');
+  igual(r.map(f => f.posicion), [1, 2, 3, 4, 5, 6], 'posiciones');
+  igual(r[0].valor, 1, 'Evaristo');
+  igual(r[1].valor, 0.5, 'Albert');
+  igual(r.map(f => f.base), [9, 16, 13, 8, 8, 11], 'partidas con resultado');
+});
+prueba('% de juegos del histórico', () => {
+  const r = rankingIndividual(partidasHistorico(), JUGADORES, POR_ID, 'juegos', 5);
+  igual(r.map(f => f.nombre), ['Evaristo', 'Albert', 'Jordi', 'Rafa', 'Juan', 'Santi'], 'orden');
+  igual(r[0].valor, 149 / 247, 'Evaristo');
+});
+prueba('quien no llega al mínimo va al final, sin posición', () => {
+  const r = rankingIndividual(partidasHistorico(), JUGADORES, POR_ID, 'victorias', 10);
+  igual(r.map(f => f.nombre), ['Albert', 'Jordi', 'Santi', 'Evaristo', 'Juan', 'Rafa'], 'orden');
+  igual(r.map(f => f.faltan), [0, 0, 0, 1, 2, 2], 'faltan');
+});
+prueba('el mínimo de % de juegos cuenta las cortadas; el de victorias, no', () => {
+  const partidas = [
+    P('6-4 6-3', { id_partida: '20261101-1', fecha: '2026-11-01', errores: [] }),
+    P('6-4 3-2', { id_partida: '20261102-1', fecha: '2026-11-02', estado: 'cortada', errores: [] })
+  ];
+  const v = rankingIndividual(partidas, JUGADORES, POR_ID, 'victorias', 2).find(f => f.id === 'J01');
+  const j = rankingIndividual(partidas, JUGADORES, POR_ID, 'juegos', 2).find(f => f.id === 'J01');
+  igual([v.base, v.faltan], [1, 1], 'victorias');
+  igual([j.base, j.faltan], [2, 0], 'juegos');
+});
+prueba('sin partidas: todos sin posición y con valor null', () => {
+  const r = rankingIndividual([], JUGADORES, POR_ID, 'juegos', 5);
+  igual(r.length, 6, 'fijos activos');
+  cierto(r.every(f => f.posicion === null && f.valor === null), 'sin posición');
+});
+prueba('VERSION_LOGICA tiene el formato aaaa-mm-dd.nn', () => {
+  cierto(/^\d{4}-\d{2}-\d{2}\.\d{2}$/.test(VERSION_LOGICA), VERSION_LOGICA);
+});
+
 grupo('statsParejas');
 
 function parejasHistorico() {

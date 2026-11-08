@@ -191,6 +191,23 @@
   .cruce .p { min-width: 48px; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
   .cruce.pocas { opacity: .55; }
 
+  /* Pestañas de ranking */
+  .pestanas { display: flex; gap: 4px; background: var(--superficie-2); border-radius: 10px; padding: 3px; margin-bottom: 8px; }
+  .pestanas button {
+    flex: 1; min-height: 38px; border: 0; border-radius: 8px; background: transparent;
+    font-size: 14px; font-weight: 600; color: var(--suave);
+  }
+  .pestanas button.activa { background: var(--superficie); color: var(--texto); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+
+  /* Avisos de versión */
+  .aviso-version {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px; margin-top: 12px;
+    border-radius: var(--radio); background: var(--aviso-suave); color: var(--aviso); font-size: 14px; font-weight: 600;
+  }
+  .aviso-version span { flex: 1; }
+  .aviso-version button { min-height: 36px; padding: 0 12px; border-radius: 999px; border: 0; background: var(--aviso); color: var(--fondo); font-weight: 700; font-size: 13px; }
+  .version { text-align: center; font-size: 11px; color: var(--suave); margin: 24px 0 0; }
+
   /* Formularios */
   label.campo { display: block; font-size: 13px; color: var(--suave); margin-bottom: 4px; }
   input[type="date"], input[type="text"], input[type="password"], select {
@@ -347,6 +364,8 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbwRtCixP2FUUnqqk7diRqpuL8gOVpttruZmStHmS-oj8a7PfZXXaVLIhrgj5GNyTsks/exec';
 const CLAVE_DATOS = 'padel6.datos';
 const CLAVE_PIN = 'padel6.pin';
+const VERSION_APP = '2026-11-08.02'; // se sube en cada entrega de index.html
+const CLAVE_PESTANA = 'padel6.pestanaRanking';
 const MINIMO_RANKING = 5; // partidas con resultado (finalizadas o empatadas) para tener posición en los rankings individuales
 const REFRESCO_MIN_MS = 60 * 1000; // al volver a la app, refresca si han pasado más de 60 s
 
@@ -356,6 +375,8 @@ const app = {
   crudo: null,          // última respuesta de doGet (lo que se guarda en caché)
   datos: null,          // resultado de parsearDatos(crudo)
   elo: null,            // resultado de calcularElo con todas las partidas
+  versionServidor: undefined, // VERSION_LOGICA que devuelve doGet (null si Codigo.gs es antiguo)
+  pestana: leer(CLAVE_PESTANA) || 'elo', // pestaña del ranking en Inicio
   errorCarga: null,
   actualizando: false,
   sinConexion: false,
@@ -452,6 +473,7 @@ async function refrescar() {
     const r = await fetch(API_URL, { cache: 'no-store' });
     const j = await r.json();
     parsearDatos(j); // lanza un error si la respuesta no sirve
+    app.versionServidor = j.version === undefined ? null : j.version;
     guardar(CLAVE_DATOS, j);
     aplicarCrudo(j);
     app.sinConexion = false;
@@ -479,7 +501,11 @@ async function enviar(accion, datos, pin) {
       pintar();
       throw new Error('El PIN guardado ya no es válido. Vuelve a entrar como editor.');
     }
-    throw new Error(j.error || 'Error desconocido del servidor');
+    let msg = j.error || 'Error desconocido del servidor';
+    if (/corresponde a una partida|Estado no válido/.test(msg)) {
+      msg += '. Puede que tengas una versión antigua de la app: ciérrala del todo y vuelve a abrirla.';
+    }
+    throw new Error(msg);
   }
   return j;
 }
@@ -541,11 +567,12 @@ function pintar() {
       : '<p class="vacio">Cargando…</p>';
     return;
   }
+  const aviso = avisoVersion();
   const vistas = {
     inicio: vistaInicio, historial: vistaHistorial, nueva: vistaNueva, resultado: vistaResultado,
     jugadores: vistaJugadores, jugador: vistaJugador, parejas: vistaParejas
   };
-  v.innerHTML = vistas[app.vista]();
+  v.innerHTML = aviso + vistas[app.vista]() + '<p class="version">Versión ' + esc(VERSION_APP) + '</p>';
 }
 
 function pintarEstado() {
@@ -620,7 +647,12 @@ function vistaInicio() {
     .slice(-5).reverse();
 
   let h = avisoErrores();
-  h += '<h2>Ranking ELO</h2>' + tablaRanking();
+  const pestanas = [['elo', 'ELO'], ['victorias', '% victorias'], ['juegos', '% juegos']];
+  h += '<h2>Ranking</h2><div class="pestanas" role="tablist">' + pestanas.map(function (t) {
+    return '<button type="button" role="tab" data-accion="pestana" data-p="' + t[0] + '" aria-selected="' + (app.pestana === t[0]) + '"' +
+      (app.pestana === t[0] ? ' class="activa"' : '') + '>' + t[1] + '</button>';
+  }).join('') + '</div>';
+  h += app.pestana === 'elo' ? tablaRanking() : tablaPorcentaje(app.pestana);
   h += '<h2>Programadas</h2>';
   h += programadas.length
     ? programadas.map(tarjetaPartida).join('')
@@ -655,6 +687,52 @@ function tablaRanking() {
   return '<div class="tarjeta ranking"><ol>' + items + '</ol></div>' +
     '<p class="nota-rk">' + contadas + (contadas === 1 ? ' partida con resultado' : ' partidas con resultado') +
     ' desde el 31 ago 2026. Mínimo ' + MINIMO_RANKING + ' para clasificar. Diferencias de menos de 15 puntos no son significativas.</p>';
+}
+
+function tablaPorcentaje(criterio) {
+  const d = app.datos;
+  const temporada = temporadaDe(hoy());
+  const partidas = filtrarPeriodo(d.partidas, { tipo: 'temporada', valor: temporada }, hoy());
+  const filas = rankingIndividual(partidas, d.jugadores, d.jugadoresPorId, criterio, MINIMO_RANKING);
+  if (!filas.length) return vacio('Todavía no hay jugadores fijos.');
+
+  const items = filas.map(function (f) {
+    const fuera = f.posicion === null;
+    const s = f.stats;
+    const detalle = criterio === 'victorias'
+      ? marcadorVED(s.victorias, s.empates, s.derrotas) + ' · ' + f.base + (f.base === 1 ? ' partida' : ' partidas')
+      : s.juegosGanados + '–' + s.juegosPerdidos + ' en juegos · ' + f.base + (f.base === 1 ? ' partida' : ' partidas');
+    return '<li class="fila-rk' + (fuera ? ' fuera' : '') + '" role="button" tabindex="0" data-accion="ficha" data-id="' + esc(f.id) + '">' +
+      '<span class="pos">' + (fuera ? '–' : f.posicion) + '</span>' +
+      '<span class="rk-nombre">' + esc(f.nombre) + '<small>' + esc(detalle + (fuera ? ' · faltan ' + f.faltan + ' para clasificar' : '')) + '</small></span>' +
+      '<span class="rk-elo">' + pct(f.valor) + '</span><span class="flecha" aria-hidden="true">›</span></li>';
+  }).join('');
+
+  const nota = criterio === 'victorias'
+    ? 'Un empate vale media victoria. Mínimo ' + MINIMO_RANKING + ' partidas con resultado.'
+    : 'Juegos ganados sobre el total, incluidas las partidas cortadas. Mínimo ' + MINIMO_RANKING + ' partidas.';
+  return '<div class="tarjeta ranking"><ol>' + items + '</ol></div>' +
+    '<p class="nota-rk">Temporada ' + esc(temporada) + '. ' + nota + '</p>';
+}
+
+/** Aviso si la app, la web publicada y el servidor no tienen la misma versión de logica.js. */
+function avisoVersion() {
+  const srv = app.versionServidor;
+  if (srv === undefined) return ''; // todavía no se ha refrescado desde el servidor
+  if (srv === null) {
+    return esEditor()
+      ? '<div class="aviso-version"><span>El servidor no informa de su versión: sustituye Codigo.gs en Apps Script por el último y publica una versión nueva.</span></div>'
+      : '';
+  }
+  if (srv > VERSION_LOGICA) {
+    return '<div class="aviso-version"><span>Hay una versión nueva de la app.</span>' +
+      '<button type="button" data-accion="recargar">Actualizar</button></div>';
+  }
+  if (srv < VERSION_LOGICA && esEditor()) {
+    return '<div class="aviso-version"><span>Apps Script tiene una versión anterior de logica.js (' + esc(srv) +
+      '). Pega logica.js en logica.gs y publica una versión nueva.</span></div>';
+  }
+  return '';
 }
 
 // ─── Vista: Ficha de jugador ──────────────────────────────────────────────────
@@ -1122,6 +1200,10 @@ const ACCIONES = {
   reintentar: function () { app.errorCarga = null; pintar(); refrescar(); },
 
   editar: function (d) { abrirEdicion(d.id); },
+
+  pestana: function (d) { app.pestana = d.p; guardar(CLAVE_PESTANA, d.p); pintar(); },
+
+  recargar: function () { window.location.reload(); },
 
   ficha: function (d) {
     app.fichaId = d.id;
